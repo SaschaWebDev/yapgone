@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.wrangler/
+coverage/
+*.local
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+*.tsbuildinfo
+
+# Compiled JS (TypeScript project — source is .ts/.tsx only)
+src/**/*.js
+tests/**/*.js
+.claude/

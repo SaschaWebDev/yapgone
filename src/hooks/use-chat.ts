@@ -1,0 +1,507 @@
+import { useState, useRef, useCallback, useEffect } from 'react'
+import {
+  generateKeyPair,
+  exportPublicKey,
+  importPublicKey,
+  deriveSharedSecret,
+  hkdfDerive,
+  toBase64Url,
+  fromBase64Url,
+  concatBytes,
+  initCreator,
+  initJoiner,
+  ratchetEncrypt,
+  ratchetDecrypt,
+  destroyState,
+} from '@/crypto'
+import { createWebSocket } from '@/ws/client'
+import type { ChatWebSocket, ClientMessage, ServerMessage } from '@/ws'
+import type { RatchetState } from '@/types'
+import { createRoom, buildWsUrl, buildInviteFragment } from '@/api'
+import { MAX_MESSAGE_LENGTH } from '@/constants'
+
+export type ChatPhase =
+  | 'creating'
+  | 'waiting'
+  | 'connecting'
+  | 'key-exchange'
+  | 'ready'
+  | 'peer-left'
+  | 'expired'
+  | 'room-closed'
+  | 'error'
+
+export interface ChatMessage {
+  id: string
+  text: string
+  sender: 'self' | 'peer' | 'system'
+  timestamp: number
+}
+
+const SALT = new TextEncoder().encode('yapgone-chat-root')
+const INFO = new Uint8Array(0)
+
+function generateMessageId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(8))
+  return toBase64Url(bytes)
+}
+
+const TYPING_SAFETY_TIMEOUT = 30_000
+
+export function useChatAsCreator() {
+  const [phase, setPhase] = useState<ChatPhase>('creating')
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [peerTyping, setPeerTyping] = useState(false)
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const wsRef = useRef<ChatWebSocket | null>(null)
+  const ratchetRef = useRef<RatchetState | null>(null)
+  const keyPairRef = useRef<CryptoKeyPair | null>(null)
+  const cleanedUpRef = useRef(false)
+  const typingSafetyRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const cleanup = useCallback(() => {
+    if (cleanedUpRef.current) return
+    cleanedUpRef.current = true
+    if (typingSafetyRef.current) {
+      clearTimeout(typingSafetyRef.current)
+      typingSafetyRef.current = null
+    }
+    if (ratchetRef.current) {
+      destroyState(ratchetRef.current)
+      ratchetRef.current = null
+    }
+    if (wsRef.current) {
+      const ws = wsRef.current
+      wsRef.current = null
+      try { ws.send({ type: 'leave' }) } catch { /* ignore */ }
+      setTimeout(() => ws.close(), 100)
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    cleanedUpRef.current = false
+
+    async function start() {
+      try {
+        const kp = await generateKeyPair()
+        if (cancelled) return
+        keyPairRef.current = kp
+
+        const roomId = await createRoom()
+        if (cancelled) return
+
+        const pubKeyRaw = await exportPublicKey(kp.publicKey)
+        const pubKeyB64 = toBase64Url(pubKeyRaw)
+        const fragment = buildInviteFragment(roomId, pubKeyB64)
+        const url = `${window.location.origin}${window.location.pathname}#${fragment}`
+        setInviteUrl(url)
+        window.location.hash = fragment
+
+        // Mark as creator in sessionStorage
+        sessionStorage.setItem(`yapgone-creator-${roomId}`, '1')
+
+        setPhase('waiting')
+
+        // Connect WebSocket
+        const ws = createWebSocket()
+        wsRef.current = ws
+
+        ws.onOpen = () => {
+          if (cancelled) return
+          setPhase('waiting')
+        }
+
+        ws.onMessage = async (msg) => {
+          if (cancelled) return
+          await handleCreatorMessage(msg, kp)
+        }
+
+        ws.onClose = (_code, reason) => {
+          if (cancelled) return
+          if (phase !== 'peer-left' && phase !== 'error') {
+            if (reason === 'Room expired') {
+              setPhase('expired')
+            }
+          }
+        }
+
+        ws.onError = () => {
+          if (cancelled) return
+          setError('Connection failed')
+          setPhase('error')
+        }
+
+        ws.connect(buildWsUrl(roomId))
+      } catch (err) {
+        if (cancelled) return
+        setError(err instanceof Error ? err.message : 'Unknown error')
+        setPhase('error')
+      }
+    }
+
+    async function handleCreatorMessage(msg: ServerMessage | ClientMessage, kp: CryptoKeyPair) {
+      if (msg.type === 'peer-joined') {
+        setPhase('key-exchange')
+        return
+      }
+
+      if (msg.type === 'peer-left') {
+        setMessages(prev => [...prev, {
+          id: generateMessageId(),
+          text: 'Your partner left the chat',
+          sender: 'system',
+          timestamp: Date.now(),
+        }])
+        setPhase('peer-left')
+        return
+      }
+
+      if (msg.type === 'room-expired') {
+        setPhase('expired')
+        return
+      }
+
+      if (msg.type === 'room-closed') {
+        setPhase('room-closed')
+        return
+      }
+
+      if (msg.type === 'error') {
+        setError(msg.message)
+        setPhase('error')
+        return
+      }
+
+      // Relayed client messages
+      if (msg.type === 'pubkey') {
+        try {
+          const remotePubKeyRaw = fromBase64Url(msg.key)
+          const remotePubKey = await importPublicKey(remotePubKeyRaw)
+          const sharedSecret = await deriveSharedSecret(kp.privateKey, remotePubKey)
+          const rootKey = await hkdfDerive(sharedSecret, SALT, INFO, 32)
+          ratchetRef.current = await initCreator(kp, rootKey)
+          setPhase('ready')
+        } catch {
+          setError('Key exchange failed')
+          setPhase('error')
+        }
+        return
+      }
+
+      if (msg.type === 'message') {
+        if (!ratchetRef.current) return
+        try {
+          const payloadBytes = fromBase64Url(msg.payload)
+          const iv = payloadBytes.slice(0, 12)
+          const ciphertext = payloadBytes.slice(12)
+          const { state: newState, plaintext } = await ratchetDecrypt(
+            ratchetRef.current,
+            msg.header,
+            iv,
+            ciphertext,
+          )
+          ratchetRef.current = newState
+          const text = new TextDecoder().decode(plaintext)
+          setMessages(prev => [...prev, {
+            id: generateMessageId(),
+            text,
+            sender: 'peer',
+            timestamp: Date.now(),
+          }])
+        } catch {
+          // Decryption failed — ignore corrupt message
+        }
+        return
+      }
+
+      if (msg.type === 'typing') {
+        if (typingSafetyRef.current) {
+          clearTimeout(typingSafetyRef.current)
+          typingSafetyRef.current = null
+        }
+        if (msg.active) {
+          setPeerTyping(true)
+          typingSafetyRef.current = setTimeout(() => {
+            setPeerTyping(false)
+          }, TYPING_SAFETY_TIMEOUT)
+        } else {
+          setPeerTyping(false)
+        }
+        return
+      }
+    }
+
+    start()
+
+    return () => {
+      cancelled = true
+      cleanup()
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const sendMessage = useCallback(async (text: string) => {
+    if (!ratchetRef.current || !wsRef.current) return
+    const trimmed = text.slice(0, MAX_MESSAGE_LENGTH)
+    if (!trimmed) return
+
+    const plaintext = new TextEncoder().encode(trimmed)
+    const { state: newState, header, iv, ciphertext } = await ratchetEncrypt(
+      ratchetRef.current,
+      plaintext,
+    )
+    ratchetRef.current = newState
+
+    const payload = toBase64Url(concatBytes(iv, ciphertext))
+    wsRef.current.send({ type: 'message', header, payload })
+
+    setMessages(prev => [...prev, {
+      id: generateMessageId(),
+      text: trimmed,
+      sender: 'self',
+      timestamp: Date.now(),
+    }])
+  }, [])
+
+  const sendTyping = useCallback((active: boolean) => {
+    wsRef.current?.send({ type: 'typing', active })
+  }, [])
+
+  const endChat = useCallback(() => {
+    cleanup()
+    setPhase('peer-left')
+    window.location.hash = ''
+  }, [cleanup])
+
+  const endChatForAll = useCallback(() => {
+    if (wsRef.current) {
+      try { wsRef.current.send({ type: 'close-room' }) } catch { /* ignore */ }
+    }
+    cleanup()
+    setPhase('room-closed')
+    window.location.hash = ''
+  }, [cleanup])
+
+  return { phase, messages, peerTyping, inviteUrl, sendMessage, sendTyping, endChat, endChatForAll, error }
+}
+
+export function useChatAsJoiner(roomId: string, creatorPubKeyB64: string) {
+  const [phase, setPhase] = useState<ChatPhase>('connecting')
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [peerTyping, setPeerTyping] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const wsRef = useRef<ChatWebSocket | null>(null)
+  const ratchetRef = useRef<RatchetState | null>(null)
+  const cleanedUpRef = useRef(false)
+  const typingSafetyRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const cleanup = useCallback(() => {
+    if (cleanedUpRef.current) return
+    cleanedUpRef.current = true
+    if (typingSafetyRef.current) {
+      clearTimeout(typingSafetyRef.current)
+      typingSafetyRef.current = null
+    }
+    if (ratchetRef.current) {
+      destroyState(ratchetRef.current)
+      ratchetRef.current = null
+    }
+    if (wsRef.current) {
+      const ws = wsRef.current
+      wsRef.current = null
+      try { ws.send({ type: 'leave' }) } catch { /* ignore */ }
+      setTimeout(() => ws.close(), 100)
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    cleanedUpRef.current = false
+
+    async function start() {
+      try {
+        setPhase('connecting')
+
+        const kp = await generateKeyPair()
+        if (cancelled) return
+
+        const creatorPubKeyRaw = fromBase64Url(creatorPubKeyB64)
+        const creatorPubKey = await importPublicKey(creatorPubKeyRaw)
+
+        // Derive shared secret and init ratchet
+        const sharedSecret = await deriveSharedSecret(kp.privateKey, creatorPubKey)
+        const rootKey = await hkdfDerive(sharedSecret, SALT, INFO, 32)
+        ratchetRef.current = await initJoiner(kp, creatorPubKey, rootKey)
+
+        if (cancelled) return
+
+        // Connect WebSocket
+        const ws = createWebSocket()
+        wsRef.current = ws
+
+        ws.onOpen = async () => {
+          if (cancelled) return
+          // Send our public key
+          const myPubKeyRaw = await exportPublicKey(kp.publicKey)
+          ws.send({ type: 'pubkey', key: toBase64Url(myPubKeyRaw) })
+          setPhase('ready')
+        }
+
+        ws.onMessage = async (msg) => {
+          if (cancelled) return
+          await handleJoinerMessage(msg)
+        }
+
+        ws.onClose = (_code, reason) => {
+          if (cancelled) return
+          if (reason === 'Room expired') {
+            setPhase('expired')
+          }
+        }
+
+        ws.onError = () => {
+          if (cancelled) return
+          setError('Connection failed')
+          setPhase('error')
+        }
+
+        ws.connect(buildWsUrl(roomId))
+      } catch (err) {
+        if (cancelled) return
+        setError(err instanceof Error ? err.message : 'Unknown error')
+        setPhase('error')
+      }
+    }
+
+    async function handleJoinerMessage(msg: ServerMessage | ClientMessage) {
+      if (msg.type === 'peer-left') {
+        setMessages(prev => [...prev, {
+          id: generateMessageId(),
+          text: 'Your partner left the chat',
+          sender: 'system',
+          timestamp: Date.now(),
+        }])
+        setPhase('peer-left')
+        return
+      }
+
+      if (msg.type === 'room-expired') {
+        setPhase('expired')
+        return
+      }
+
+      if (msg.type === 'room-closed') {
+        setPhase('room-closed')
+        return
+      }
+
+      if (msg.type === 'room-full') {
+        setError('Room is full')
+        setPhase('error')
+        return
+      }
+
+      if (msg.type === 'error') {
+        setError(msg.message)
+        setPhase('error')
+        return
+      }
+
+      if (msg.type === 'message') {
+        if (!ratchetRef.current) return
+        try {
+          const payloadBytes = fromBase64Url(msg.payload)
+          const iv = payloadBytes.slice(0, 12)
+          const ciphertext = payloadBytes.slice(12)
+          const { state: newState, plaintext } = await ratchetDecrypt(
+            ratchetRef.current,
+            msg.header,
+            iv,
+            ciphertext,
+          )
+          ratchetRef.current = newState
+          const text = new TextDecoder().decode(plaintext)
+          setMessages(prev => [...prev, {
+            id: generateMessageId(),
+            text,
+            sender: 'peer',
+            timestamp: Date.now(),
+          }])
+        } catch {
+          // Decryption failed — ignore
+        }
+        return
+      }
+
+      if (msg.type === 'typing') {
+        if (typingSafetyRef.current) {
+          clearTimeout(typingSafetyRef.current)
+          typingSafetyRef.current = null
+        }
+        if (msg.active) {
+          setPeerTyping(true)
+          typingSafetyRef.current = setTimeout(() => {
+            setPeerTyping(false)
+          }, TYPING_SAFETY_TIMEOUT)
+        } else {
+          setPeerTyping(false)
+        }
+        return
+      }
+    }
+
+    start()
+
+    return () => {
+      cancelled = true
+      cleanup()
+    }
+  }, [roomId, creatorPubKeyB64]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const sendMessage = useCallback(async (text: string) => {
+    if (!ratchetRef.current || !wsRef.current) return
+    const trimmed = text.slice(0, MAX_MESSAGE_LENGTH)
+    if (!trimmed) return
+
+    const plaintext = new TextEncoder().encode(trimmed)
+    const { state: newState, header, iv, ciphertext } = await ratchetEncrypt(
+      ratchetRef.current,
+      plaintext,
+    )
+    ratchetRef.current = newState
+
+    const payload = toBase64Url(concatBytes(iv, ciphertext))
+    wsRef.current.send({ type: 'message', header, payload })
+
+    setMessages(prev => [...prev, {
+      id: generateMessageId(),
+      text: trimmed,
+      sender: 'self',
+      timestamp: Date.now(),
+    }])
+  }, [])
+
+  const sendTyping = useCallback((active: boolean) => {
+    wsRef.current?.send({ type: 'typing', active })
+  }, [])
+
+  const endChat = useCallback(() => {
+    cleanup()
+    setPhase('peer-left')
+    window.location.hash = ''
+  }, [cleanup])
+
+  const endChatForAll = useCallback(() => {
+    if (wsRef.current) {
+      try { wsRef.current.send({ type: 'close-room' }) } catch { /* ignore */ }
+    }
+    cleanup()
+    setPhase('room-closed')
+    window.location.hash = ''
+  }, [cleanup])
+
+  return { phase, messages, peerTyping, inviteUrl: null, sendMessage, sendTyping, endChat, endChatForAll, error }
+}

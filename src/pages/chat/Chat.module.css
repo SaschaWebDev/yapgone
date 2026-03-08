@@ -1,0 +1,266 @@
+.wrapper {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  animation: fadeIn 0.4s ease-out;
+  min-height: 0;
+}
+
+.centered {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  gap: 1rem;
+  text-align: center;
+}
+
+.status {
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
+
+.inviteSection {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  max-width: 100%;
+}
+
+.inviteLabel {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.inviteBox {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.6rem 0.85rem;
+  max-width: 100%;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.inviteBox:hover {
+  border-color: rgba(var(--fg), 0.2);
+  background: var(--bg-elevated);
+}
+
+.inviteBoxCopied {
+  border-color: rgba(var(--success-rgb), 0.3);
+  background: rgba(var(--success-rgb), 0.04);
+}
+
+.inviteBoxCopied:hover {
+  border-color: rgba(var(--success-rgb), 0.3);
+  background: rgba(var(--success-rgb), 0.04);
+}
+
+.copiedHint {
+  position: absolute;
+  top: -24px;
+  right: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--success);
+  white-space: nowrap;
+  pointer-events: none;
+  animation: hint-in 0.2s ease;
+  opacity: 1;
+  transition: opacity 0.4s ease;
+}
+
+.copiedHintFading {
+  opacity: 0;
+}
+
+@keyframes hint-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.urlText {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+.copyIcon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: rgba(var(--fg), 0.06);
+  border: 1px solid rgba(var(--fg), 0.08);
+  color: rgba(var(--fg), 0.4);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.copyIcon:hover,
+.inviteBox:hover .copyIcon {
+  background: rgba(var(--fg), 0.1);
+  color: rgba(var(--fg), 0.6);
+}
+
+.endMessage {
+  color: var(--text-secondary);
+  font-size: 1rem;
+  font-style: italic;
+}
+
+.errorMessage {
+  color: var(--error);
+  font-size: 0.95rem;
+}
+
+.restartLink {
+  color: var(--accent);
+  font-size: 0.9rem;
+  text-decoration: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.restartLink:hover {
+  text-decoration: underline;
+}
+
+.restartLink:disabled {
+  opacity: 0.5;
+  cursor: default;
+  text-decoration: none;
+}
+
+.restartRow {
+  text-align: center;
+  padding: 0.5rem 0;
+}
+
+.chatHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.endButtons {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.endButton {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  padding: 0.3rem 0.75rem;
+  font-size: 0.8rem;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.endButton:hover {
+  color: var(--error);
+  border-color: var(--error);
+}
+
+.confirmBar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.confirmText {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.confirmYes {
+  background: none;
+  border: 1px solid var(--error);
+  border-radius: var(--radius-sm);
+  color: var(--error);
+  padding: 0.3rem 0.75rem;
+  font-size: 0.8rem;
+  transition: background 0.15s;
+}
+
+.confirmYes:hover {
+  background: var(--error);
+  color: var(--bg);
+}
+
+.confirmCancel {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  padding: 0.3rem 0.75rem;
+  font-size: 0.8rem;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.confirmCancel:hover {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+.messageList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.75rem 0;
+  min-height: 0;
+}
+
+.typingIndicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0.5rem 0.85rem;
+  align-self: flex-start;
+}
+
+.typingDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: typingPulse 1.4s infinite;
+}
+
+.typingDot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.typingDot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes typingPulse {
+  0%, 60%, 100% {
+    opacity: 0.4;
+    transform: scale(0.8);
+  }
+  30% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
