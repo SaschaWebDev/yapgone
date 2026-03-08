@@ -1,4 +1,8 @@
 export const MAX_MESSAGE_LENGTH = 2000
+export const VOICE_NOTE_MAX_DURATION_MS = 120_000
+export const VOICE_NOTE_MAX_BYTES = 128_000
+export const VOICE_NOTE_CHUNK_BYTES = 2_000
+export const VOICE_NOTE_ASSEMBLY_TIMEOUT_MS = 60_000
 
 export const ROOM_INACTIVITY_TTL_MS = 30 * 60 * 1000 // 30 minutes
 
