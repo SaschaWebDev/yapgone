@@ -16,3 +16,21 @@ export interface RatchetState {
 export type AppRoute =
   | { mode: 'home' }
   | { mode: 'chat'; roomId: string; creatorPubKey: string }
+
+export type VoiceSignal =
+  | { kind: 'voice-request' }
+  | { kind: 'voice-accept' }
+  | { kind: 'voice-decline' }
+  | { kind: 'sdp-offer'; sdp: string }
+  | { kind: 'sdp-answer'; sdp: string }
+  | { kind: 'ice-candidate'; candidate: string }
+  | { kind: 'voice-end' }
+
+export type CallState =
+  | 'idle'
+  | 'requesting'
+  | 'ringing'
+  | 'connecting'
+  | 'active'
+  | 'ended'
+  | 'failed'

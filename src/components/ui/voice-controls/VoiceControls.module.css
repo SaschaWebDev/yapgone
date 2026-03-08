@@ -1,0 +1,214 @@
+.wrapper {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  animation: fadeIn 0.2s ease-out;
+}
+
+.callButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.callButton:hover {
+  color: var(--success);
+  border-color: var(--success);
+  background: rgba(var(--success-rgb), 0.06);
+}
+
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+}
+
+.bannerText {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  flex: 1;
+}
+
+.duration {
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  min-width: 3ch;
+}
+
+.activeDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  animation: pulse 2s infinite;
+}
+
+.controlButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.muteButton {
+  composes: controlButton;
+  background: rgba(var(--fg), 0.06);
+  color: var(--text-secondary);
+}
+
+.muteButton:hover {
+  background: rgba(var(--fg), 0.12);
+  color: var(--text-primary);
+}
+
+.mutedButton {
+  composes: controlButton;
+  background: rgba(var(--error-rgb, 239, 68, 68), 0.1);
+  color: var(--error);
+}
+
+.mutedButton:hover {
+  background: rgba(var(--error-rgb, 239, 68, 68), 0.2);
+}
+
+.endCallButton {
+  composes: controlButton;
+  background: var(--error);
+  color: var(--bg);
+}
+
+.endCallButton:hover {
+  opacity: 0.85;
+}
+
+.acceptButton {
+  composes: controlButton;
+  background: var(--success);
+  color: var(--bg);
+}
+
+.acceptButton:hover {
+  opacity: 0.85;
+}
+
+.declineButton {
+  composes: controlButton;
+  background: var(--error);
+  color: var(--bg);
+}
+
+.declineButton:hover {
+  opacity: 0.85;
+}
+
+.cancelButton {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  padding: 0.2rem 0.6rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.cancelButton:hover {
+  color: var(--error);
+  border-color: var(--error);
+}
+
+.privacyNotice {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.6rem;
+  background: rgba(var(--fg), 0.03);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  animation: fadeIn 0.2s ease-out;
+}
+
+.privacyText {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.privacyActions {
+  display: flex;
+  gap: 0.4rem;
+  justify-content: flex-end;
+}
+
+.privacyAccept {
+  background: none;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  padding: 0.25rem 0.7rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.privacyAccept:hover {
+  background: rgba(var(--accent-rgb, 99, 102, 241), 0.08);
+}
+
+.privacyCancel {
+  composes: cancelButton;
+}
+
+.endedText {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+.failedText {
+  color: var(--error);
+  font-size: 0.8rem;
+}
+
+.retryButton {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  padding: 0.2rem 0.6rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.retryButton:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

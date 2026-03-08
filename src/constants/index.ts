@@ -8,6 +8,8 @@ export const API_BASE_URL = import.meta.env.VITE_API_URL ?? ''
 
 export const COPY_FLASH_FADE_MS = 1200
 export const COPY_FLASH_DONE_MS = 1600
+export const VOICE_CONNECT_TIMEOUT_MS = 20_000
+export const VOICE_DISCONNECTED_GRACE_MS = 5_000
 
 export const STORAGE_KEYS = {
   THEME: 'yapgone-theme',

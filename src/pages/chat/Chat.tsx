@@ -1,9 +1,11 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { useChatAsCreator, useChatAsJoiner } from '@/hooks';
+import { useChatAsCreator, useChatAsJoiner, useVoiceCall } from '@/hooks';
+import type { VoiceSignal } from '@/types';
 import {
   MessageBubble,
   ChatInput,
   StatusBadge,
+  VoiceControls,
   IconCopy,
   IconCheck,
 } from '@/components';
@@ -31,6 +33,7 @@ export function Chat({ roomId, creatorPubKey }: ChatProps) {
 }
 
 function CreatorChat() {
+  const voiceHandlerRef = useRef<((signal: VoiceSignal) => void) | null>(null);
   const {
     phase,
     messages,
@@ -38,10 +41,17 @@ function CreatorChat() {
     inviteUrl,
     sendMessage,
     sendTyping,
+    sendVoiceSignal,
     endChat,
     endChatForAll,
     error,
-  } = useChatAsCreator();
+  } = useChatAsCreator(voiceHandlerRef);
+
+  const voice = useVoiceCall({
+    sendSignal: sendVoiceSignal,
+    onSignalRef: voiceHandlerRef,
+    peerConnected: phase === 'ready',
+  });
 
   return (
     <ChatView
@@ -54,6 +64,7 @@ function CreatorChat() {
       onTyping={sendTyping}
       onEnd={endChat}
       onEndForAll={endChatForAll}
+      voice={voice}
     />
   );
 }
@@ -65,16 +76,24 @@ function JoinerChat({
   roomId: string;
   creatorPubKey: string;
 }) {
+  const voiceHandlerRef = useRef<((signal: VoiceSignal) => void) | null>(null);
   const {
     phase,
     messages,
     peerTyping,
     sendMessage,
     sendTyping,
+    sendVoiceSignal,
     endChat,
     endChatForAll,
     error,
-  } = useChatAsJoiner(roomId, creatorPubKey);
+  } = useChatAsJoiner(roomId, creatorPubKey, voiceHandlerRef);
+
+  const voice = useVoiceCall({
+    sendSignal: sendVoiceSignal,
+    onSignalRef: voiceHandlerRef,
+    peerConnected: phase === 'ready',
+  });
 
   return (
     <ChatView
@@ -87,8 +106,23 @@ function JoinerChat({
       onTyping={sendTyping}
       onEnd={endChat}
       onEndForAll={endChatForAll}
+      voice={voice}
     />
   );
+}
+
+interface VoiceState {
+  callState: import('@/types').CallState;
+  isMuted: boolean;
+  callDuration: number;
+  privacyAcknowledged: boolean;
+  startCall: () => void;
+  acceptCall: () => Promise<void>;
+  declineCall: () => void;
+  endCall: () => void;
+  toggleMute: () => void;
+  acknowledgePrivacy: () => void;
+  resetCallState: () => void;
 }
 
 interface ChatViewProps {
@@ -106,6 +140,7 @@ interface ChatViewProps {
   onTyping: (active: boolean) => void;
   onEnd: () => void;
   onEndForAll: () => void;
+  voice: VoiceState;
 }
 
 function ChatView({
@@ -118,6 +153,7 @@ function ChatView({
   onTyping,
   onEnd,
   onEndForAll,
+  voice,
 }: ChatViewProps) {
   const [showEndConfirm, setShowEndConfirm] = useState(false);
   const [showEndForMeConfirm, setShowEndForMeConfirm] = useState(false);
@@ -339,6 +375,19 @@ function ChatView({
           </div>
         )}
       </div>
+      <VoiceControls
+        callState={voice.callState}
+        isMuted={voice.isMuted}
+        callDuration={voice.callDuration}
+        privacyAcknowledged={voice.privacyAcknowledged}
+        onStartCall={voice.startCall}
+        onAcceptCall={voice.acceptCall}
+        onDeclineCall={voice.declineCall}
+        onEndCall={voice.endCall}
+        onToggleMute={voice.toggleMute}
+        onAcknowledgePrivacy={voice.acknowledgePrivacy}
+        onResetCallState={voice.resetCallState}
+      />
       <div className={styles.messageList} role='list' aria-label='Messages'>
         {messages.map((msg) => (
           <MessageBubble
