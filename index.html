@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>yapgone — Ephemeral Encrypted Chat</title>
+    <meta name="description" content="Privacy-first, zero-knowledge, ephemeral encrypted chat. Conversations fade away when you're done. The server never sees your messages." />
+    <meta name="theme-color" content="#0a0a0a" />
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="yapgone — Ephemeral Encrypted Chat" />
+    <meta property="og:description" content="Privacy-first, zero-knowledge, ephemeral encrypted chat. Conversations fade away when you're done." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://yapgone.com/" />
+    <meta property="og:image" content="https://yapgone.com/og-image.png" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="yapgone — Ephemeral Encrypted Chat" />
+    <meta name="twitter:description" content="Privacy-first, zero-knowledge, ephemeral encrypted chat." />
+    <meta name="twitter:image" content="https://yapgone.com/og-image.png" />
+
+    <link rel="canonical" href="https://yapgone.com/" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.json" />
+
+  </head>
+  <body>
+    <noscript>
+      <style>
+        #root { display: none; }
+        .noscript-msg { font-family: system-ui, sans-serif; color: #e0e0e0; background: #0a0a0a; padding: 2rem; text-align: center; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+      </style>
+      <div class="noscript-msg">
+        <p>yapgone requires JavaScript to encrypt and decrypt messages in your browser. Please enable JavaScript to continue.</p>
+      </div>
+    </noscript>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

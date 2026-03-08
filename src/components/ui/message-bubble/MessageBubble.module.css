@@ -1,0 +1,48 @@
+.bubble {
+  max-width: 75%;
+  padding: 0.6rem 0.85rem;
+  border-radius: var(--radius-lg);
+  animation: slideUp 0.2s ease-out;
+  word-break: break-word;
+}
+
+.self {
+  align-self: flex-end;
+  background: var(--accent);
+  color: #fff;
+  border-bottom-right-radius: var(--radius-sm);
+}
+
+.peer {
+  align-self: flex-start;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border-bottom-left-radius: var(--radius-sm);
+}
+
+.text {
+  font-size: 0.925rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.time {
+  display: block;
+  font-size: 0.7rem;
+  opacity: 0.5;
+  margin-top: 0.25rem;
+  text-align: right;
+}
+
+.system {
+  align-self: center;
+  padding: 0.4rem 0;
+  animation: slideUp 0.2s ease-out;
+}
+
+.systemText {
+  font-size: 0.8rem;
+  color: var(--text-tertiary);
+  font-style: italic;
+  text-align: center;
+}

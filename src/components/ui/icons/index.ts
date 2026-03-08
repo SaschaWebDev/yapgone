@@ -1,0 +1,6 @@
+export type { IconProps } from './types'
+export { IconSend } from './icon-send'
+export { IconCopy } from './icon-copy'
+export { IconCheck } from './icon-check'
+export { IconLock } from './icon-lock'
+export { IconLink } from './icon-link'

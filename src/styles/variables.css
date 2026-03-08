@@ -1,0 +1,50 @@
+:root {
+  --fg: 255, 255, 255;
+  --accent-rgb: 99, 102, 241;
+  --success-rgb: 34, 197, 94;
+  --warning-rgb: 234, 179, 8;
+  --error-rgb: 239, 68, 68;
+
+  --bg-root: #0a0a0a;
+  --bg-page: #111111;
+  --bg-card: #1a1a1a;
+  --bg-elevated: #222222;
+  --bg-overlay: rgba(0, 0, 0, 0.7);
+  --bg-code: #1e1e1e;
+
+  --text-primary: rgba(var(--fg), 0.92);
+  --text-secondary: rgba(var(--fg), 0.55);
+  --text-tertiary: rgba(var(--fg), 0.3);
+
+  --accent: rgb(var(--accent-rgb));
+  --accent-hover: rgb(129, 132, 255);
+  --success: rgb(var(--success-rgb));
+  --warning: rgb(var(--warning-rgb));
+  --error: rgb(var(--error-rgb));
+  --link: rgb(var(--accent-rgb));
+
+  --border: rgba(var(--fg), 0.1);
+  --border-focus: rgba(var(--accent-rgb), 0.5);
+
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'SF Mono', 'Fira Code', 'Fira Mono', Menlo, Consolas, monospace;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+}
+
+[data-theme="light"] {
+  --fg: 0, 0, 0;
+
+  --bg-root: #ffffff;
+  --bg-page: #fafafa;
+  --bg-card: #f5f5f5;
+  --bg-elevated: #eeeeee;
+  --bg-overlay: rgba(0, 0, 0, 0.4);
+  --bg-code: #f0f0f0;
+
+  --accent-hover: rgb(79, 82, 220);
+
+  --border: rgba(var(--fg), 0.12);
+}
