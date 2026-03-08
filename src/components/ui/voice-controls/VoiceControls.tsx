@@ -106,7 +106,8 @@ export function VoiceControls({
       <div className={styles.privacyNotice}>
         <p className={styles.privacyText}>
           Voice calls connect directly between you and your partner (peer-to-peer).
-          Your IP address will be visible to them. Use a VPN if this concerns you.
+          This applies whether you start or accept a call. Your IP address will be
+          visible to them. Use a VPN if this concerns you.
         </p>
         <div className={styles.privacyActions}>
           <button
