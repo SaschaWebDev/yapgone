@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { useChatAsCreator, useChatAsJoiner, useVoiceCall } from '@/hooks';
 import type { VoiceSignal } from '@/types';
+import type { ChatMessage } from '@/hooks/use-chat';
 import {
   MessageBubble,
   ChatInput,
@@ -14,6 +15,8 @@ import {
   COPY_FLASH_FADE_MS,
   COPY_FLASH_DONE_MS,
   STORAGE_KEYS,
+  VOICE_NOTE_MAX_BYTES,
+  VOICE_NOTE_MAX_DURATION_MS,
 } from '@/constants';
 import styles from './Chat.module.css';
 
@@ -42,6 +45,7 @@ function CreatorChat() {
     sendMessage,
     sendTyping,
     sendVoiceSignal,
+    sendVoiceNote,
     endChat,
     endChatForAll,
     error,
@@ -62,6 +66,7 @@ function CreatorChat() {
       error={error}
       onSend={sendMessage}
       onTyping={sendTyping}
+      onSendVoiceNote={sendVoiceNote}
       onEnd={endChat}
       onEndForAll={endChatForAll}
       voice={voice}
@@ -84,6 +89,7 @@ function JoinerChat({
     sendMessage,
     sendTyping,
     sendVoiceSignal,
+    sendVoiceNote,
     endChat,
     endChatForAll,
     error,
@@ -104,6 +110,7 @@ function JoinerChat({
       error={error}
       onSend={sendMessage}
       onTyping={sendTyping}
+      onSendVoiceNote={sendVoiceNote}
       onEnd={endChat}
       onEndForAll={endChatForAll}
       voice={voice}
@@ -127,17 +134,13 @@ interface VoiceState {
 
 interface ChatViewProps {
   phase: string;
-  messages: Array<{
-    id: string;
-    text: string;
-    sender: 'self' | 'peer' | 'system';
-    timestamp: number;
-  }>;
+  messages: ChatMessage[];
   peerTyping: boolean;
   inviteUrl: string | null;
   error: string | null;
   onSend: (text: string) => void;
   onTyping: (active: boolean) => void;
+  onSendVoiceNote: (blob: Blob, durationMs: number, mimeType: string) => Promise<void>;
   onEnd: () => void;
   onEndForAll: () => void;
   voice: VoiceState;
@@ -151,6 +154,7 @@ function ChatView({
   error,
   onSend,
   onTyping,
+  onSendVoiceNote,
   onEnd,
   onEndForAll,
   voice,
@@ -160,6 +164,16 @@ function ChatView({
   const [copyState, setCopyState] = useState<'idle' | 'shown' | 'fading'>(
     'idle',
   );
+  const [isRecordingNote, setIsRecordingNote] = useState(false);
+  const [voiceNoteError, setVoiceNoteError] = useState<string | null>(null);
+  const [isSendingVoiceNote, setIsSendingVoiceNote] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const recordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const voiceNoteChunksRef = useRef<Blob[]>([]);
+  const voiceNoteStartedAtRef = useRef<number | null>(null);
+  const voiceNoteStreamRef = useRef<MediaStream | null>(null);
+  const voiceNoteAutoStopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const copied = copyState !== 'idle';
 
@@ -193,6 +207,135 @@ function ChatView({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length]);
+
+  useEffect(() => {
+    return () => {
+      if (voiceNoteAutoStopRef.current) {
+        clearTimeout(voiceNoteAutoStopRef.current);
+      }
+      if (recordingIntervalRef.current) {
+        clearInterval(recordingIntervalRef.current);
+      }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      }
+      if (voiceNoteStreamRef.current) {
+        voiceNoteStreamRef.current.getTracks().forEach((track) => track.stop());
+      }
+    };
+  }, []);
+
+  const clearVoiceNoteRecorder = useCallback(() => {
+    if (voiceNoteAutoStopRef.current) {
+      clearTimeout(voiceNoteAutoStopRef.current);
+      voiceNoteAutoStopRef.current = null;
+    }
+    if (recordingIntervalRef.current) {
+      clearInterval(recordingIntervalRef.current);
+      recordingIntervalRef.current = null;
+    }
+    if (voiceNoteStreamRef.current) {
+      voiceNoteStreamRef.current.getTracks().forEach((track) => track.stop());
+      voiceNoteStreamRef.current = null;
+    }
+    mediaRecorderRef.current = null;
+    voiceNoteChunksRef.current = [];
+    voiceNoteStartedAtRef.current = null;
+    setIsRecordingNote(false);
+    setRecordingDuration(0);
+  }, []);
+
+  const startVoiceNoteRecording = useCallback(async () => {
+    if (isRecordingNote || isSendingVoiceNote) return;
+    setVoiceNoteError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      voiceNoteStreamRef.current = stream;
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : '';
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      voiceNoteChunksRef.current = [];
+      voiceNoteStartedAtRef.current = Date.now();
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          voiceNoteChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onerror = () => {
+        setVoiceNoteError('Voice note recording failed');
+        clearVoiceNoteRecorder();
+      };
+
+      recorder.start();
+      setIsRecordingNote(true);
+      setRecordingDuration(0);
+      recordingIntervalRef.current = setInterval(() => {
+        setRecordingDuration((prev) => prev + 1);
+      }, 1000);
+      voiceNoteAutoStopRef.current = setTimeout(() => {
+        if (mediaRecorderRef.current?.state === 'recording') {
+          mediaRecorderRef.current.stop();
+        }
+      }, VOICE_NOTE_MAX_DURATION_MS);
+    } catch {
+      setVoiceNoteError('Microphone permission denied');
+      clearVoiceNoteRecorder();
+    }
+  }, [clearVoiceNoteRecorder, isRecordingNote, isSendingVoiceNote]);
+
+  const stopVoiceNoteRecording = useCallback(async () => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state !== 'recording') return;
+    setIsSendingVoiceNote(true);
+
+    await new Promise<void>((resolve) => {
+      recorder.onstop = () => resolve();
+      recorder.stop();
+    });
+
+    const startedAt = voiceNoteStartedAtRef.current ?? Date.now();
+    const durationMs = Math.max(0, Date.now() - startedAt);
+    const mimeType = recorder.mimeType || 'audio/webm';
+    const blob = new Blob(voiceNoteChunksRef.current, { type: mimeType });
+
+    clearVoiceNoteRecorder();
+
+    if (durationMs === 0 || blob.size === 0) {
+      setVoiceNoteError('Voice note is empty');
+      setIsSendingVoiceNote(false);
+      return;
+    }
+    if (blob.size > VOICE_NOTE_MAX_BYTES) {
+      setVoiceNoteError('Voice note too large');
+      setIsSendingVoiceNote(false);
+      return;
+    }
+
+    try {
+      await onSendVoiceNote(blob, durationMs, mimeType);
+      setVoiceNoteError(null);
+    } catch {
+      setVoiceNoteError('Failed to send voice note');
+    } finally {
+      setIsSendingVoiceNote(false);
+    }
+  }, [clearVoiceNoteRecorder, onSendVoiceNote]);
+
+  const cancelVoiceNoteRecording = useCallback(() => {
+    if (mediaRecorderRef.current?.state === 'recording') {
+      mediaRecorderRef.current.ondataavailable = null;
+      mediaRecorderRef.current.onstop = null;
+      mediaRecorderRef.current.stop();
+    }
+    clearVoiceNoteRecorder();
+    setVoiceNoteError(null);
+  }, [clearVoiceNoteRecorder]);
 
   if (phase === 'creating' || phase === 'connecting') {
     return (
@@ -264,7 +407,10 @@ function ChatView({
           {messages.map((msg) => (
             <MessageBubble
               key={msg.id}
+              kind={msg.kind}
               text={msg.text}
+              audioUrl={msg.audioUrl}
+              durationMs={msg.durationMs}
               sender={msg.sender}
               timestamp={msg.timestamp}
             />
@@ -389,14 +535,17 @@ function ChatView({
         onResetCallState={voice.resetCallState}
       />
       <div className={styles.messageList} role='list' aria-label='Messages'>
-        {messages.map((msg) => (
-          <MessageBubble
-            key={msg.id}
-            text={msg.text}
-            sender={msg.sender}
-            timestamp={msg.timestamp}
-          />
-        ))}
+          {messages.map((msg) => (
+            <MessageBubble
+              key={msg.id}
+              kind={msg.kind}
+              text={msg.text}
+              audioUrl={msg.audioUrl}
+              durationMs={msg.durationMs}
+              sender={msg.sender}
+              timestamp={msg.timestamp}
+            />
+          ))}
         {peerTyping && (
           <div
             className={styles.typingIndicator}
@@ -414,6 +563,13 @@ function ChatView({
         onTyping={onTyping}
         disabled={false}
         maxLength={MAX_MESSAGE_LENGTH}
+        isRecording={isRecordingNote}
+        isSendingVoiceNote={isSendingVoiceNote}
+        recordingDuration={recordingDuration}
+        onStartRecording={startVoiceNoteRecording}
+        onStopRecording={stopVoiceNoteRecording}
+        onCancelRecording={cancelVoiceNoteRecording}
+        voiceNoteError={voiceNoteError}
       />
     </div>
   );

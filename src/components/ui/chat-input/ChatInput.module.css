@@ -1,3 +1,9 @@
+.wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
 .container {
   display: flex;
   align-items: flex-end;
@@ -56,4 +62,82 @@
 .sendButton:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.micButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.micButton:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.recordingBar {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: var(--bg-card);
+  border: 1px solid var(--error);
+  border-radius: var(--radius-md);
+  padding: 0 0.85rem;
+  min-height: 44px;
+}
+
+.recordingDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--error);
+  flex-shrink: 0;
+  animation: recordingPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes recordingPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.recordingTimer {
+  font-size: 0.925rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.cancelButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.cancelButton:hover {
+  color: var(--error);
+  border-color: var(--error);
+}
+
+.voiceNoteError {
+  font-size: 0.75rem;
+  color: var(--error);
+  padding-left: 0.1rem;
 }
