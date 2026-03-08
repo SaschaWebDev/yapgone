@@ -1,4 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
+import type { RefObject } from 'react'
+import { z } from 'zod'
 import {
   generateKeyPair,
   exportPublicKey,
@@ -16,7 +18,7 @@ import {
 } from '@/crypto'
 import { createWebSocket } from '@/ws/client'
 import type { ChatWebSocket, ClientMessage, ServerMessage } from '@/ws'
-import type { RatchetState } from '@/types'
+import type { RatchetState, VoiceSignal } from '@/types'
 import { createRoom, buildWsUrl, buildInviteFragment } from '@/api'
 import { MAX_MESSAGE_LENGTH } from '@/constants'
 
@@ -41,6 +43,19 @@ export interface ChatMessage {
 const SALT = new TextEncoder().encode('yapgone-chat-root')
 const INFO = new Uint8Array(0)
 
+const DecryptedPayloadSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('text'), content: z.string() }),
+  z.object({ kind: z.literal('voice-request') }),
+  z.object({ kind: z.literal('voice-accept') }),
+  z.object({ kind: z.literal('voice-decline') }),
+  z.object({ kind: z.literal('sdp-offer'), sdp: z.string() }),
+  z.object({ kind: z.literal('sdp-answer'), sdp: z.string() }),
+  z.object({ kind: z.literal('ice-candidate'), candidate: z.string() }),
+  z.object({ kind: z.literal('voice-end') }),
+])
+
+type VoiceHandlerRef = RefObject<((signal: VoiceSignal) => void) | null>
+
 function generateMessageId(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(8))
   return toBase64Url(bytes)
@@ -48,7 +63,7 @@ function generateMessageId(): string {
 
 const TYPING_SAFETY_TIMEOUT = 30_000
 
-export function useChatAsCreator() {
+export function useChatAsCreator(voiceHandlerRef?: VoiceHandlerRef) {
   const [phase, setPhase] = useState<ChatPhase>('creating')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [peerTyping, setPeerTyping] = useState(false)
@@ -204,15 +219,23 @@ export function useChatAsCreator() {
             ciphertext,
           )
           ratchetRef.current = newState
-          const text = new TextDecoder().decode(plaintext)
-          setMessages(prev => [...prev, {
-            id: generateMessageId(),
-            text,
-            sender: 'peer',
-            timestamp: Date.now(),
-          }])
+          const decoded = new TextDecoder().decode(plaintext)
+          const parsed: unknown = JSON.parse(decoded)
+          const result = DecryptedPayloadSchema.safeParse(parsed)
+          if (!result.success) return
+          if (result.data.kind === 'text') {
+            const text = result.data.content
+            setMessages(prev => [...prev, {
+              id: generateMessageId(),
+              text,
+              sender: 'peer',
+              timestamp: Date.now(),
+            }])
+          } else {
+            voiceHandlerRef?.current?.(result.data)
+          }
         } catch {
-          // Decryption failed — ignore corrupt message
+          // Decryption or parse failed — ignore
         }
         return
       }
@@ -247,7 +270,9 @@ export function useChatAsCreator() {
     const trimmed = text.slice(0, MAX_MESSAGE_LENGTH)
     if (!trimmed) return
 
-    const plaintext = new TextEncoder().encode(trimmed)
+    const plaintext = new TextEncoder().encode(
+      JSON.stringify({ kind: 'text', content: trimmed }),
+    )
     const { state: newState, header, iv, ciphertext } = await ratchetEncrypt(
       ratchetRef.current,
       plaintext,
@@ -263,6 +288,18 @@ export function useChatAsCreator() {
       sender: 'self',
       timestamp: Date.now(),
     }])
+  }, [])
+
+  const sendVoiceSignal = useCallback(async (signal: VoiceSignal) => {
+    if (!ratchetRef.current || !wsRef.current) return
+    const plaintext = new TextEncoder().encode(JSON.stringify(signal))
+    const { state: newState, header, iv, ciphertext } = await ratchetEncrypt(
+      ratchetRef.current,
+      plaintext,
+    )
+    ratchetRef.current = newState
+    const payload = toBase64Url(concatBytes(iv, ciphertext))
+    wsRef.current.send({ type: 'message', header, payload })
   }, [])
 
   const sendTyping = useCallback((active: boolean) => {
@@ -284,10 +321,10 @@ export function useChatAsCreator() {
     window.location.hash = ''
   }, [cleanup])
 
-  return { phase, messages, peerTyping, inviteUrl, sendMessage, sendTyping, endChat, endChatForAll, error }
+  return { phase, messages, peerTyping, inviteUrl, sendMessage, sendTyping, sendVoiceSignal, endChat, endChatForAll, error }
 }
 
-export function useChatAsJoiner(roomId: string, creatorPubKeyB64: string) {
+export function useChatAsJoiner(roomId: string, creatorPubKeyB64: string, voiceHandlerRef?: VoiceHandlerRef) {
   const [phase, setPhase] = useState<ChatPhase>('connecting')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [peerTyping, setPeerTyping] = useState(false)
@@ -423,15 +460,23 @@ export function useChatAsJoiner(roomId: string, creatorPubKeyB64: string) {
             ciphertext,
           )
           ratchetRef.current = newState
-          const text = new TextDecoder().decode(plaintext)
-          setMessages(prev => [...prev, {
-            id: generateMessageId(),
-            text,
-            sender: 'peer',
-            timestamp: Date.now(),
-          }])
+          const decoded = new TextDecoder().decode(plaintext)
+          const parsed: unknown = JSON.parse(decoded)
+          const result = DecryptedPayloadSchema.safeParse(parsed)
+          if (!result.success) return
+          if (result.data.kind === 'text') {
+            const text = result.data.content
+            setMessages(prev => [...prev, {
+              id: generateMessageId(),
+              text,
+              sender: 'peer',
+              timestamp: Date.now(),
+            }])
+          } else {
+            voiceHandlerRef?.current?.(result.data)
+          }
         } catch {
-          // Decryption failed — ignore
+          // Decryption or parse failed — ignore
         }
         return
       }
@@ -466,7 +511,9 @@ export function useChatAsJoiner(roomId: string, creatorPubKeyB64: string) {
     const trimmed = text.slice(0, MAX_MESSAGE_LENGTH)
     if (!trimmed) return
 
-    const plaintext = new TextEncoder().encode(trimmed)
+    const plaintext = new TextEncoder().encode(
+      JSON.stringify({ kind: 'text', content: trimmed }),
+    )
     const { state: newState, header, iv, ciphertext } = await ratchetEncrypt(
       ratchetRef.current,
       plaintext,
@@ -482,6 +529,18 @@ export function useChatAsJoiner(roomId: string, creatorPubKeyB64: string) {
       sender: 'self',
       timestamp: Date.now(),
     }])
+  }, [])
+
+  const sendVoiceSignal = useCallback(async (signal: VoiceSignal) => {
+    if (!ratchetRef.current || !wsRef.current) return
+    const plaintext = new TextEncoder().encode(JSON.stringify(signal))
+    const { state: newState, header, iv, ciphertext } = await ratchetEncrypt(
+      ratchetRef.current,
+      plaintext,
+    )
+    ratchetRef.current = newState
+    const payload = toBase64Url(concatBytes(iv, ciphertext))
+    wsRef.current.send({ type: 'message', header, payload })
   }, [])
 
   const sendTyping = useCallback((active: boolean) => {
@@ -503,5 +562,5 @@ export function useChatAsJoiner(roomId: string, creatorPubKeyB64: string) {
     window.location.hash = ''
   }, [cleanup])
 
-  return { phase, messages, peerTyping, inviteUrl: null, sendMessage, sendTyping, endChat, endChatForAll, error }
+  return { phase, messages, peerTyping, inviteUrl: null, sendMessage, sendTyping, sendVoiceSignal, endChat, endChatForAll, error }
 }
