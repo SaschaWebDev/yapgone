@@ -59,6 +59,10 @@ export function _shouldStartDisconnectedGrace(
   return iceState === 'disconnected'
 }
 
+export function _canEnterRingingOnIncoming(callState: CallState): boolean {
+  return callState === 'idle' || callState === 'ended' || callState === 'failed' || callState === 'requesting'
+}
+
 export function useVoiceCall({
   sendSignal,
   onSignalRef,
@@ -344,7 +348,13 @@ export function useVoiceCall({
   const handleSignal = useCallback(async (signal: VoiceSignal) => {
     switch (signal.kind) {
       case 'voice-request': {
-        if (stateRef.current === 'idle') {
+        if (_canEnterRingingOnIncoming(stateRef.current)) {
+          clearConnectingTimeout()
+          clearDisconnectedTimeout()
+          if (durationIntervalRef.current) {
+            clearInterval(durationIntervalRef.current)
+            durationIntervalRef.current = null
+          }
           setCallState('ringing')
         }
         break

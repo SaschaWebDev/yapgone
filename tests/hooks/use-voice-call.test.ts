@@ -4,6 +4,7 @@ import {
   _getIceHandlingStrategy,
   _shouldFailForConnectionState,
   _shouldStartDisconnectedGrace,
+  _canEnterRingingOnIncoming,
 } from '@/hooks/use-voice-call'
 
 describe('voice call ICE strategy', () => {
@@ -41,5 +42,20 @@ describe('voice call ICE failure transitions', () => {
     expect(_shouldStartDisconnectedGrace('active', 'disconnected', false)).toBe(true)
     expect(_shouldStartDisconnectedGrace('active', 'disconnected', true)).toBe(false)
     expect(_shouldStartDisconnectedGrace('idle', 'disconnected', false)).toBe(false)
+  })
+})
+
+describe('incoming call transition guard', () => {
+  it('allows ringing from idle/ended/failed/requesting', () => {
+    expect(_canEnterRingingOnIncoming('idle')).toBe(true)
+    expect(_canEnterRingingOnIncoming('ended')).toBe(true)
+    expect(_canEnterRingingOnIncoming('failed')).toBe(true)
+    expect(_canEnterRingingOnIncoming('requesting')).toBe(true)
+  })
+
+  it('blocks ringing transition from connecting/active/ringing', () => {
+    expect(_canEnterRingingOnIncoming('connecting')).toBe(false)
+    expect(_canEnterRingingOnIncoming('active')).toBe(false)
+    expect(_canEnterRingingOnIncoming('ringing')).toBe(false)
   })
 })
