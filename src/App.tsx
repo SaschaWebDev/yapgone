@@ -9,7 +9,11 @@ export function App() {
     <ErrorBoundary>
       <Layout>
         {route.mode === 'chat' ? (
-          <Chat roomId={route.roomId} creatorPubKey={route.creatorPubKey} />
+          <Chat
+            roomId={route.roomId}
+            creatorPubKey={route.creatorPubKey}
+            roomSettings={route.roomSettings}
+          />
         ) : (
           <Home />
         )}

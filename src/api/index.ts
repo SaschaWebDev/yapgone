@@ -1,4 +1,6 @@
 import { API_BASE_URL } from '@/constants'
+import type { RoomSettings } from '@/room-settings'
+import { encodeRoomSettings } from '@/room-settings'
 
 export async function createRoom(): Promise<string> {
   const res = await fetch(`${API_BASE_URL}/api/rooms`, { method: 'POST' })
@@ -24,6 +26,14 @@ export function buildWsUrl(roomId: string): string {
   return `${protocol}://${host}/ws/${roomId}`
 }
 
-export function buildInviteFragment(roomId: string, pubKeyB64: string): string {
-  return `${roomId}:${pubKeyB64}`
+export function buildInviteFragment(
+  roomId: string,
+  pubKeyB64: string,
+  roomSettings?: RoomSettings | null,
+): string {
+  const encoded = roomSettings ? encodeRoomSettings(roomSettings) : null
+  if (!encoded) {
+    return `${roomId}:${pubKeyB64}`
+  }
+  return `${roomId}:${pubKeyB64}:${encoded}`
 }

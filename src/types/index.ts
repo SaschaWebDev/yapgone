@@ -1,3 +1,5 @@
+import type { RoomSettings } from '@/room-settings'
+
 export interface RatchetState {
   dhKeyPair: CryptoKeyPair
   remotePubKey: CryptoKey | null
@@ -15,7 +17,7 @@ export interface RatchetState {
 
 export type AppRoute =
   | { mode: 'home' }
-  | { mode: 'chat'; roomId: string; creatorPubKey: string }
+  | { mode: 'chat'; roomId: string; creatorPubKey: string; roomSettings: RoomSettings | null }
 
 export type VoiceSignal =
   | { kind: 'voice-request' }

@@ -7,6 +7,15 @@ describe('api client', () => {
     expect(result).toBe('room-123:pubkey-abc')
   })
 
+  it('buildInviteFragment appends encoded settings payload', () => {
+    const result = buildInviteFragment('room-123', 'pubkey-abc', {
+      usernameModeEnabled: true,
+      safeWord: null,
+    })
+    expect(result.split(':')).toHaveLength(3)
+    expect(result.startsWith('room-123:pubkey-abc:')).toBe(true)
+  })
+
   it('buildWsUrl converts http to ws', () => {
     // buildWsUrl uses API_BASE_URL or window.location.origin
     // In test env, window.location.origin is available via happy-dom

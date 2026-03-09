@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import type { AppRoute } from '@/types'
+import { decodeRoomSettings } from '@/room-settings'
 
 export function parseFragment(hash: string): AppRoute {
   const fragment = hash.startsWith('#') ? hash.slice(1) : hash
@@ -7,19 +8,28 @@ export function parseFragment(hash: string): AppRoute {
     return { mode: 'home' }
   }
 
-  const colonIndex = fragment.indexOf(':')
-  if (colonIndex === -1) {
+  const firstColon = fragment.indexOf(':')
+  if (firstColon === -1) {
     return { mode: 'home' }
   }
 
-  const roomId = fragment.slice(0, colonIndex)
-  const creatorPubKey = fragment.slice(colonIndex + 1)
+  const secondColon = fragment.indexOf(':', firstColon + 1)
+  const roomId = fragment.slice(0, firstColon)
+  const creatorPubKey = secondColon === -1
+    ? fragment.slice(firstColon + 1)
+    : fragment.slice(firstColon + 1, secondColon)
+  const encodedSettings = secondColon === -1 ? null : fragment.slice(secondColon + 1)
 
   if (!roomId || !creatorPubKey) {
     return { mode: 'home' }
   }
 
-  return { mode: 'chat', roomId, creatorPubKey }
+  return {
+    mode: 'chat',
+    roomId,
+    creatorPubKey,
+    roomSettings: decodeRoomSettings(encodedSettings),
+  }
 }
 
 export function useHashRoute(): AppRoute {
