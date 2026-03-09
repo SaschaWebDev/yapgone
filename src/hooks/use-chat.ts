@@ -20,6 +20,8 @@ import { createWebSocket } from '@/ws/client'
 import type { ChatWebSocket, ClientMessage, ServerMessage } from '@/ws'
 import type { RatchetState, VoiceSignal } from '@/types'
 import { createRoom, buildWsUrl, buildInviteFragment } from '@/api'
+import type { RoomSettings } from '@/room-settings'
+import { DEFAULT_ROOM_SETTINGS, normalizeRoomSettings } from '@/room-settings'
 import {
   MAX_MESSAGE_LENGTH,
   VOICE_NOTE_ASSEMBLY_TIMEOUT_MS,
@@ -45,6 +47,7 @@ export interface ChatMessage {
   audioUrl?: string
   durationMs?: number
   sender: 'self' | 'peer' | 'system'
+  displayName?: string
   timestamp: number
 }
 
@@ -78,6 +81,7 @@ const DecryptedPayloadSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('sdp-answer'), sdp: z.string() }),
   z.object({ kind: z.literal('ice-candidate'), candidate: z.string() }),
   z.object({ kind: z.literal('voice-end') }),
+  z.object({ kind: z.literal('username-set'), username: z.string().min(1).max(24) }),
 ])
 
 type VoiceHandlerRef = RefObject<((signal: VoiceSignal) => void) | null>
@@ -143,6 +147,7 @@ function buildAudioMessage(
   sender: 'self' | 'peer',
   objectUrl: string,
   durationMs: number,
+  displayName?: string,
 ): ChatMessage {
   return {
     id: generateMessageId(),
@@ -150,32 +155,51 @@ function buildAudioMessage(
     audioUrl: objectUrl,
     durationMs,
     sender,
+    displayName,
     timestamp: Date.now(),
   }
 }
 
-function buildTextMessage(sender: 'self' | 'peer' | 'system', text: string): ChatMessage {
+function buildTextMessage(
+  sender: 'self' | 'peer' | 'system',
+  text: string,
+  displayName?: string,
+): ChatMessage {
   return {
     id: generateMessageId(),
     kind: 'text',
     text,
     sender,
+    displayName,
     timestamp: Date.now(),
   }
 }
 
 const TYPING_SAFETY_TIMEOUT = 30_000
 
-export function useChatAsCreator(voiceHandlerRef?: VoiceHandlerRef) {
+export function useChatAsCreator(
+  voiceHandlerRef?: VoiceHandlerRef,
+  initialRoomSettings?: RoomSettings | null,
+) {
   const [phase, setPhase] = useState<ChatPhase>('creating')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [peerTyping, setPeerTyping] = useState(false)
   const [inviteUrl, setInviteUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [roomSettings, setRoomSettings] = useState<RoomSettings>(() =>
+    normalizeRoomSettings(initialRoomSettings ?? DEFAULT_ROOM_SETTINGS),
+  )
+  const [localUsername, setLocalUsername] = useState<string | null>(null)
+  const [peerUsername, setPeerUsername] = useState<string | null>(null)
 
   const wsRef = useRef<ChatWebSocket | null>(null)
   const ratchetRef = useRef<RatchetState | null>(null)
   const keyPairRef = useRef<CryptoKeyPair | null>(null)
+  const roomIdRef = useRef<string | null>(null)
+  const creatorPubKeyRef = useRef<string | null>(null)
+  const roomSettingsRef = useRef<RoomSettings>(normalizeRoomSettings(initialRoomSettings ?? DEFAULT_ROOM_SETTINGS))
+  const localUsernameRef = useRef<string | null>(null)
+  const peerUsernameRef = useRef<string | null>(null)
   const cleanedUpRef = useRef(false)
   const typingSafetyRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const voiceNoteAssembliesRef = useRef<Map<string, VoiceNoteAssembly>>(new Map())
@@ -184,6 +208,41 @@ export function useChatAsCreator(voiceHandlerRef?: VoiceHandlerRef) {
   const trackAudioUrl = useCallback((url: string) => {
     localAudioUrlsRef.current.add(url)
   }, [])
+
+  const setLocalUsernameAndNotify = useCallback(async (username: string) => {
+    const trimmed = username.trim().slice(0, 24)
+    if (!trimmed) return
+    localUsernameRef.current = trimmed
+    setLocalUsername(trimmed)
+    if (!ratchetRef.current || !wsRef.current) return
+    const plaintext = new TextEncoder().encode(
+      JSON.stringify({ kind: 'username-set', username: trimmed }),
+    )
+    const { state: newState, header, iv, ciphertext } = await ratchetEncrypt(
+      ratchetRef.current,
+      plaintext,
+    )
+    ratchetRef.current = newState
+    const payload = toBase64Url(concatBytes(iv, ciphertext))
+    wsRef.current.send({ type: 'message', header, payload })
+  }, [])
+
+  const refreshInviteUrl = useCallback((nextSettings: RoomSettings) => {
+    const roomId = roomIdRef.current
+    const creatorPubKey = creatorPubKeyRef.current
+    if (!roomId || !creatorPubKey) return
+    const fragment = buildInviteFragment(roomId, creatorPubKey, nextSettings)
+    const url = `${window.location.origin}${window.location.pathname}#${fragment}`
+    setInviteUrl(url)
+    window.location.hash = fragment
+  }, [])
+
+  const updateRoomSettings = useCallback((next: RoomSettings) => {
+    const normalized = normalizeRoomSettings(next)
+    roomSettingsRef.current = normalized
+    setRoomSettings(normalized)
+    refreshInviteUrl(normalized)
+  }, [refreshInviteUrl])
 
   const cleanupVoiceNoteAssemblies = useCallback(() => {
     const now = Date.now()
@@ -251,7 +310,12 @@ export function useChatAsCreator(voiceHandlerRef?: VoiceHandlerRef) {
     const blob = new Blob([arrayBuffer], { type: assembly.mimeType })
     const objectUrl = URL.createObjectURL(blob)
     trackAudioUrl(objectUrl)
-    setMessages(prev => [...prev, buildAudioMessage(sender, objectUrl, assembly.durationMs)])
+    setMessages(prev => [...prev, buildAudioMessage(
+      sender,
+      objectUrl,
+      assembly.durationMs,
+      sender === 'peer' ? peerUsernameRef.current ?? undefined : localUsernameRef.current ?? undefined,
+    )])
     voiceNoteAssembliesRef.current.delete(payload.noteId)
   }, [cleanupVoiceNoteAssemblies, trackAudioUrl])
 
@@ -291,10 +355,12 @@ export function useChatAsCreator(voiceHandlerRef?: VoiceHandlerRef) {
 
         const roomId = await createRoom()
         if (cancelled) return
+        roomIdRef.current = roomId
 
         const pubKeyRaw = await exportPublicKey(kp.publicKey)
         const pubKeyB64 = toBase64Url(pubKeyRaw)
-        const fragment = buildInviteFragment(roomId, pubKeyB64)
+        creatorPubKeyRef.current = pubKeyB64
+        const fragment = buildInviteFragment(roomId, pubKeyB64, roomSettingsRef.current)
         const url = `${window.location.origin}${window.location.pathname}#${fragment}`
         setInviteUrl(url)
         window.location.hash = fragment
@@ -408,7 +474,15 @@ export function useChatAsCreator(voiceHandlerRef?: VoiceHandlerRef) {
               content: z.string(),
             }).safeParse(result.data)
             if (!textPayload.success) return
-            setMessages(prev => [...prev, buildTextMessage('peer', textPayload.data.content)])
+            setMessages(prev => [
+              ...prev,
+              buildTextMessage('peer', textPayload.data.content, peerUsernameRef.current ?? undefined),
+            ])
+          } else if (result.data.kind === 'username-set') {
+            const nextPeerUsername = result.data.username.trim().slice(0, 24)
+            if (!nextPeerUsername) return
+            peerUsernameRef.current = nextPeerUsername
+            setPeerUsername(nextPeerUsername)
           } else if (
             result.data.kind === 'voice-note-meta' ||
             result.data.kind === 'voice-note-chunk' ||
@@ -467,7 +541,7 @@ export function useChatAsCreator(voiceHandlerRef?: VoiceHandlerRef) {
     wsRef.current.send({ type: 'message', header, payload })
 
     setMessages(prev => [...prev, {
-      ...buildTextMessage('self', trimmed),
+      ...buildTextMessage('self', trimmed, localUsernameRef.current ?? undefined),
     }])
   }, [])
 
@@ -527,7 +601,12 @@ export function useChatAsCreator(voiceHandlerRef?: VoiceHandlerRef) {
 
     const objectUrl = URL.createObjectURL(blob)
     trackAudioUrl(objectUrl)
-    setMessages(prev => [...prev, buildAudioMessage('self', objectUrl, durationMs)])
+    setMessages(prev => [...prev, buildAudioMessage(
+      'self',
+      objectUrl,
+      durationMs,
+      localUsernameRef.current ?? undefined,
+    )])
   }, [trackAudioUrl])
 
   const sendTyping = useCallback((active: boolean) => {
@@ -560,18 +639,36 @@ export function useChatAsCreator(voiceHandlerRef?: VoiceHandlerRef) {
     sendVoiceNote,
     endChat,
     endChatForAll,
+    roomSettings,
+    updateRoomSettings,
+    usernameModeEnabled: roomSettings.usernameModeEnabled,
+    localUsername,
+    peerUsername,
+    setLocalUsername: setLocalUsernameAndNotify,
     error,
   }
 }
 
-export function useChatAsJoiner(roomId: string, creatorPubKeyB64: string, voiceHandlerRef?: VoiceHandlerRef) {
+export function useChatAsJoiner(
+  roomId: string,
+  creatorPubKeyB64: string,
+  roomSettings?: RoomSettings | null,
+  voiceHandlerRef?: VoiceHandlerRef,
+) {
   const [phase, setPhase] = useState<ChatPhase>('connecting')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [peerTyping, setPeerTyping] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [localUsername, setLocalUsername] = useState<string | null>(null)
+  const [peerUsername, setPeerUsername] = useState<string | null>(null)
+  const [resolvedRoomSettings] = useState<RoomSettings>(
+    normalizeRoomSettings(roomSettings ?? DEFAULT_ROOM_SETTINGS),
+  )
 
   const wsRef = useRef<ChatWebSocket | null>(null)
   const ratchetRef = useRef<RatchetState | null>(null)
+  const localUsernameRef = useRef<string | null>(null)
+  const peerUsernameRef = useRef<string | null>(null)
   const cleanedUpRef = useRef(false)
   const typingSafetyRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const voiceNoteAssembliesRef = useRef<Map<string, VoiceNoteAssembly>>(new Map())
@@ -579,6 +676,24 @@ export function useChatAsJoiner(roomId: string, creatorPubKeyB64: string, voiceH
 
   const trackAudioUrl = useCallback((url: string) => {
     localAudioUrlsRef.current.add(url)
+  }, [])
+
+  const setLocalUsernameAndNotify = useCallback(async (username: string) => {
+    const trimmed = username.trim().slice(0, 24)
+    if (!trimmed) return
+    localUsernameRef.current = trimmed
+    setLocalUsername(trimmed)
+    if (!ratchetRef.current || !wsRef.current) return
+    const plaintext = new TextEncoder().encode(
+      JSON.stringify({ kind: 'username-set', username: trimmed }),
+    )
+    const { state: newState, header, iv, ciphertext } = await ratchetEncrypt(
+      ratchetRef.current,
+      plaintext,
+    )
+    ratchetRef.current = newState
+    const payload = toBase64Url(concatBytes(iv, ciphertext))
+    wsRef.current.send({ type: 'message', header, payload })
   }, [])
 
   const cleanupVoiceNoteAssemblies = useCallback(() => {
@@ -647,7 +762,12 @@ export function useChatAsJoiner(roomId: string, creatorPubKeyB64: string, voiceH
     const noteBlob = new Blob([arrayBuffer], { type: assembly.mimeType })
     const objectUrl = URL.createObjectURL(noteBlob)
     trackAudioUrl(objectUrl)
-    setMessages(prev => [...prev, buildAudioMessage(sender, objectUrl, assembly.durationMs)])
+    setMessages(prev => [...prev, buildAudioMessage(
+      sender,
+      objectUrl,
+      assembly.durationMs,
+      sender === 'peer' ? peerUsernameRef.current ?? undefined : localUsernameRef.current ?? undefined,
+    )])
     voiceNoteAssembliesRef.current.delete(payload.noteId)
   }, [cleanupVoiceNoteAssemblies, trackAudioUrl])
 
@@ -786,7 +906,15 @@ export function useChatAsJoiner(roomId: string, creatorPubKeyB64: string, voiceH
               content: z.string(),
             }).safeParse(result.data)
             if (!textPayload.success) return
-            setMessages(prev => [...prev, buildTextMessage('peer', textPayload.data.content)])
+            setMessages(prev => [
+              ...prev,
+              buildTextMessage('peer', textPayload.data.content, peerUsernameRef.current ?? undefined),
+            ])
+          } else if (result.data.kind === 'username-set') {
+            const nextPeerUsername = result.data.username.trim().slice(0, 24)
+            if (!nextPeerUsername) return
+            peerUsernameRef.current = nextPeerUsername
+            setPeerUsername(nextPeerUsername)
           } else if (
             result.data.kind === 'voice-note-meta' ||
             result.data.kind === 'voice-note-chunk' ||
@@ -845,7 +973,7 @@ export function useChatAsJoiner(roomId: string, creatorPubKeyB64: string, voiceH
     wsRef.current.send({ type: 'message', header, payload })
 
     setMessages(prev => [...prev, {
-      ...buildTextMessage('self', trimmed),
+      ...buildTextMessage('self', trimmed, localUsernameRef.current ?? undefined),
     }])
   }, [])
 
@@ -905,7 +1033,12 @@ export function useChatAsJoiner(roomId: string, creatorPubKeyB64: string, voiceH
 
     const objectUrl = URL.createObjectURL(blob)
     trackAudioUrl(objectUrl)
-    setMessages(prev => [...prev, buildAudioMessage('self', objectUrl, durationMs)])
+    setMessages(prev => [...prev, buildAudioMessage(
+      'self',
+      objectUrl,
+      durationMs,
+      localUsernameRef.current ?? undefined,
+    )])
   }, [trackAudioUrl])
 
   const sendTyping = useCallback((active: boolean) => {
@@ -938,6 +1071,11 @@ export function useChatAsJoiner(roomId: string, creatorPubKeyB64: string, voiceH
     sendVoiceNote,
     endChat,
     endChatForAll,
+    roomSettings: resolvedRoomSettings,
+    usernameModeEnabled: resolvedRoomSettings.usernameModeEnabled,
+    localUsername,
+    peerUsername,
+    setLocalUsername: setLocalUsernameAndNotify,
     error,
   }
 }

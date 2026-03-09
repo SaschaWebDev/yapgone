@@ -1,6 +1,9 @@
 export const MAX_MESSAGE_LENGTH = 2000
 export const VOICE_NOTE_MAX_DURATION_MS = 120_000
 export const VOICE_NOTE_MAX_BYTES = 128_000
+export const VOICE_NOTE_SIZE_WARNING_THRESHOLD_S = 10
+export const VOICE_NOTE_SIZE_SAFETY_RATIO = 0.95
+export const VOICE_NOTE_TIMESLICE_MS = 1000
 export const VOICE_NOTE_CHUNK_BYTES = 2_000
 export const VOICE_NOTE_ASSEMBLY_TIMEOUT_MS = 60_000
 
@@ -14,8 +17,11 @@ export const COPY_FLASH_FADE_MS = 1200
 export const COPY_FLASH_DONE_MS = 1600
 export const VOICE_CONNECT_TIMEOUT_MS = 20_000
 export const VOICE_DISCONNECTED_GRACE_MS = 5_000
+export const SAFE_WORD_MAX_ATTEMPTS = 3
+export const USERNAME_MAX_LENGTH = 24
 
 export const STORAGE_KEYS = {
   THEME: 'yapgone-theme',
   CREATOR_PREFIX: 'yapgone-creator-',
+  SAFEWORD_LOCK_PREFIX: 'yapgone-safeword-lock-',
 } as const

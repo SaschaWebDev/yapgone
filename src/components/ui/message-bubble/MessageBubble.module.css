@@ -26,13 +26,38 @@
   white-space: pre-wrap;
 }
 
+.displayName {
+  font-size: 0.72rem;
+  font-weight: 600;
+  opacity: 0.75;
+  margin-bottom: 0.2rem;
+}
+
 /* Custom audio player */
 .audioPlayer {
   display: flex;
-  align-items: center;
-  gap: 0.5rem;
+  flex-direction: column;
+  gap: 0.35rem;
   min-width: 200px;
   padding: 0.15rem 0;
+}
+
+.audioControls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.audioMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.audioMetaRight {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
 }
 
 .playButton {
@@ -94,6 +119,78 @@
   opacity: 0.6;
 }
 
+/* Speed badge */
+.speedBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  padding: 0.05rem 0.3rem 0.15rem;
+  border-radius: 999px;
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0.45;
+  transition: opacity 0.15s;
+  line-height: 1;
+}
+
+.speedBadge:hover {
+  opacity: 0.8;
+}
+
+.speedActive {
+  opacity: 0.9;
+}
+
+.speedActive:hover {
+  opacity: 1;
+}
+
+.speedBadgeSelf {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+.speedBadgePeer {
+  background: rgba(var(--fg), 0.08);
+  color: var(--accent);
+}
+
+/* Download button */
+.downloadButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s;
+  background: transparent;
+}
+
+.audioMeta:hover .downloadButton {
+  opacity: 0.6;
+}
+
+.downloadButton:hover {
+  opacity: 1 !important;
+}
+
+.downloadButtonSelf {
+  color: #fff;
+}
+
+.downloadButtonPeer {
+  color: var(--accent);
+}
+
 .audioDuration {
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
@@ -104,9 +201,13 @@
 }
 
 .time {
-  display: block;
   font-size: 0.7rem;
   opacity: 0.5;
+}
+
+/* Standalone time below text messages */
+.bubble > .time {
+  display: block;
   margin-top: 0.25rem;
   text-align: right;
 }

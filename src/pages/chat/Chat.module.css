@@ -254,6 +254,196 @@
   animation-delay: 0.4s;
 }
 
+.settingsSection {
+  width: 100%;
+  max-width: 540px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.gearButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  background: rgba(var(--fg), 0.04);
+  border: 1px solid rgba(var(--fg), 0.08);
+  border-radius: 12px;
+  color: rgba(var(--fg), 0.3);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.gearButton:hover {
+  color: rgba(var(--fg), 0.55);
+  background: rgba(var(--fg), 0.07);
+  border-color: rgba(var(--fg), 0.12);
+}
+
+.gearButtonActive {
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.06);
+  border-color: rgba(var(--accent-rgb), 0.2);
+}
+
+.settingsPanel {
+  width: 100%;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  text-align: left;
+}
+
+.settingsRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.settingsLabel {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.settingsToggle {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  padding: 0.25rem 0.6rem;
+}
+
+.settingsInput {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text-primary);
+  padding: 0.5rem 0.65rem;
+}
+
+.settingsSave {
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #fff;
+  padding: 0.45rem 0.8rem;
+  align-self: flex-start;
+  cursor: pointer;
+}
+
+.settingsError {
+  color: var(--error);
+  font-size: 0.8rem;
+}
+
+.safeWordTitle {
+  font-size: 1.1rem;
+  color: var(--text-primary);
+}
+
+.safeWordText {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.safeWordForm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-width: 280px;
+}
+
+.safeWordInput {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.55rem 0.7rem;
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+.safeWordButton {
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #fff;
+  padding: 0.55rem 0.7rem;
+  cursor: pointer;
+}
+
+.safeWordRemaining {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.safeWordBlocked {
+  font-size: 0.82rem;
+  color: var(--error);
+}
+
+.usernameModalBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.32);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 30;
+  padding: 1rem;
+}
+
+.usernameModal {
+  width: min(420px, 100%);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.usernameTitle {
+  color: var(--text-primary);
+  font-size: 1rem;
+}
+
+.usernameText {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.usernameInput {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.55rem 0.7rem;
+  background: var(--bg);
+  color: var(--text-primary);
+}
+
+.usernamePeerHint {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.usernameSave {
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #fff;
+  padding: 0.55rem 0.7rem;
+  cursor: pointer;
+}
+
 
 @keyframes typingPulse {
   0%, 60%, 100% {

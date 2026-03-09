@@ -7,6 +7,7 @@ interface MessageBubbleProps {
   audioUrl?: string
   durationMs?: number
   sender: 'self' | 'peer' | 'system'
+  displayName?: string
   timestamp: number
 }
 
@@ -17,13 +18,26 @@ function formatSeconds(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
-function AudioPlayer({ src, durationMs, isSelf }: { src: string; durationMs?: number; isSelf: boolean }) {
+const SPEEDS = [1, 1.5, 2] as const
+
+function generateDownloadId(): string {
+  if (typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  const bytes = crypto.getRandomValues(new Uint8Array(16))
+  return Array.from(bytes)
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+function AudioPlayer({ src, durationMs, isSelf, timestamp }: { src: string; durationMs?: number; isSelf: boolean; timestamp: number }) {
   const audioRef = useRef<HTMLAudioElement>(null)
   const trackRef = useRef<HTMLDivElement>(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [progress, setProgress] = useState(0)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(durationMs ? durationMs / 1000 : 0)
+  const [speedIndex, setSpeedIndex] = useState(0)
 
   useEffect(() => {
     const audio = audioRef.current
@@ -83,49 +97,104 @@ function AudioPlayer({ src, durationMs, isSelf }: { src: string; durationMs?: nu
     setCurrentTime(audio.currentTime)
   }, [])
 
+  const cycleSpeed = useCallback(() => {
+    const next = (speedIndex + 1) % SPEEDS.length
+    setSpeedIndex(next)
+    const rate = SPEEDS[next] ?? 1
+    if (audioRef.current) {
+      audioRef.current.playbackRate = rate
+    }
+  }, [speedIndex])
+
+  const handleDownload = useCallback(() => {
+    const a = document.createElement('a')
+    a.href = src
+    a.download = `voice-note_${generateDownloadId()}.webm`
+    a.click()
+  }, [src])
+
   const timeLabel = isPlaying && duration > 0
     ? formatSeconds(duration - currentTime)
     : formatSeconds(duration)
 
+  const formattedTime = new Date(timestamp).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+
   return (
     <div className={styles.audioPlayer}>
-      <audio ref={audioRef} src={src} preload="metadata" />
-      <button
-        className={`${styles.playButton} ${isSelf ? styles.playButtonSelf : styles.playButtonPeer}`}
-        onClick={togglePlay}
-        aria-label={isPlaying ? 'Pause' : 'Play'}
-      >
-        {isPlaying ? (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-            <rect x="6" y="4" width="4" height="16" rx="1" />
-            <rect x="14" y="4" width="4" height="16" rx="1" />
-          </svg>
-        ) : (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-            <polygon points="7 3 21 12 7 21" />
-          </svg>
-        )}
-      </button>
-      <div
-        ref={trackRef}
-        className={`${styles.progressTrack} ${isSelf ? styles.progressTrackSelf : styles.progressTrackPeer}`}
-        onClick={handleSeek}
-        role="progressbar"
-        aria-valuenow={Math.round(progress * 100)}
-        aria-valuemin={0}
-        aria-valuemax={100}
-      >
+      <div className={styles.audioControls}>
+        <audio ref={audioRef} src={src} preload="metadata" />
+        <button
+          className={`${styles.playButton} ${isSelf ? styles.playButtonSelf : styles.playButtonPeer}`}
+          onClick={togglePlay}
+          aria-label={isPlaying ? 'Pause' : 'Play'}
+        >
+          {isPlaying ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <rect x="6" y="4" width="4" height="16" rx="1" />
+              <rect x="14" y="4" width="4" height="16" rx="1" />
+            </svg>
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="7 3 21 12 7 21" />
+            </svg>
+          )}
+        </button>
         <div
-          className={`${styles.progressFill} ${isSelf ? styles.progressFillSelf : styles.progressFillPeer}`}
-          style={{ width: `${progress * 100}%` }}
-        />
+          ref={trackRef}
+          className={`${styles.progressTrack} ${isSelf ? styles.progressTrackSelf : styles.progressTrackPeer}`}
+          onClick={handleSeek}
+          role="progressbar"
+          aria-valuenow={Math.round(progress * 100)}
+          aria-valuemin={0}
+          aria-valuemax={100}
+        >
+          <div
+            className={`${styles.progressFill} ${isSelf ? styles.progressFillSelf : styles.progressFillPeer}`}
+            style={{ width: `${progress * 100}%` }}
+          />
+        </div>
+        <span className={styles.audioDuration}>{timeLabel}</span>
       </div>
-      <span className={styles.audioDuration}>{timeLabel}</span>
+      <div className={styles.audioMeta}>
+        <button
+          className={`${styles.speedBadge} ${isSelf ? styles.speedBadgeSelf : styles.speedBadgePeer} ${speedIndex > 0 ? styles.speedActive : ''}`}
+          onClick={cycleSpeed}
+          aria-label={`Playback speed ${SPEEDS[speedIndex]}×`}
+        >
+          {SPEEDS[speedIndex]}×
+        </button>
+        <div className={styles.audioMetaRight}>
+          <button
+            className={`${styles.downloadButton} ${isSelf ? styles.downloadButtonSelf : styles.downloadButtonPeer}`}
+            onClick={handleDownload}
+            aria-label="Download voice note"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 3v13m0 0l-4-4m4 4l4-4" />
+              <path d="M5 20h14" />
+            </svg>
+          </button>
+          <time className={styles.time} dateTime={new Date(timestamp).toISOString()}>
+            {formattedTime}
+          </time>
+        </div>
+      </div>
     </div>
   )
 }
 
-export function MessageBubble({ kind = 'text', text, audioUrl, durationMs, sender, timestamp }: MessageBubbleProps) {
+export function MessageBubble({
+  kind = 'text',
+  text,
+  audioUrl,
+  durationMs,
+  sender,
+  displayName,
+  timestamp,
+}: MessageBubbleProps) {
   if (sender === 'system') {
     return (
       <div className={styles.system} role="listitem">
@@ -146,14 +215,17 @@ export function MessageBubble({ kind = 'text', text, audioUrl, durationMs, sende
       className={`${styles.bubble} ${isSelf ? styles.self : styles.peer}`}
       role="listitem"
     >
+      {displayName && <p className={styles.displayName}>{displayName}</p>}
       {kind === 'audio' && audioUrl ? (
-        <AudioPlayer src={audioUrl} durationMs={durationMs} isSelf={isSelf} />
+        <AudioPlayer src={audioUrl} durationMs={durationMs} isSelf={isSelf} timestamp={timestamp} />
       ) : (
-        <p className={styles.text}>{text ?? ''}</p>
+        <>
+          <p className={styles.text}>{text ?? ''}</p>
+          <time className={styles.time} dateTime={new Date(timestamp).toISOString()}>
+            {time}
+          </time>
+        </>
       )}
-      <time className={styles.time} dateTime={new Date(timestamp).toISOString()}>
-        {time}
-      </time>
     </div>
   )
 }
