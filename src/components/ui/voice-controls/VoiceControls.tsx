@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import type { CallState } from '@/types'
 import { IconPhone, IconMic, IconMicOff } from '../icons'
 import styles from './VoiceControls.module.css'
@@ -44,6 +44,58 @@ export function VoiceControls({
 }: VoiceControlsProps) {
   const [showPrivacyNotice, setShowPrivacyNotice] = useState(false)
   const [pendingPrivacyAction, setPendingPrivacyAction] = useState<PrivacyAction | null>(null)
+  const [ringtoneBlocked, setRingtoneBlocked] = useState(false)
+  const ringtoneRef = useRef<HTMLAudioElement | null>(null)
+
+  useEffect(() => {
+    const ringtone = new Audio('/yapgone-ringtone.mp3')
+    ringtone.loop = true
+    ringtone.preload = 'auto'
+    ringtoneRef.current = ringtone
+
+    return () => {
+      if (ringtoneRef.current) {
+        ringtoneRef.current.pause()
+        ringtoneRef.current.currentTime = 0
+      }
+      ringtoneRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    const ringtone = ringtoneRef.current
+    if (!ringtone) return
+
+    if (callState === 'ringing') {
+      ringtone.currentTime = 0
+      void ringtone.play()
+        .then(() => {
+          setRingtoneBlocked(false)
+        })
+        .catch(() => {
+          // Browser may block autoplay until user interaction.
+          setRingtoneBlocked(true)
+        })
+      return
+    }
+
+    ringtone.pause()
+    ringtone.currentTime = 0
+    setRingtoneBlocked(false)
+  }, [callState])
+
+  const handleEnableRingtone = () => {
+    const ringtone = ringtoneRef.current
+    if (!ringtone) return
+    ringtone.currentTime = 0
+    void ringtone.play()
+      .then(() => {
+        setRingtoneBlocked(false)
+      })
+      .catch(() => {
+        setRingtoneBlocked(true)
+      })
+  }
 
   // Auto-reset ended/failed state after a brief display
   useEffect(() => {
@@ -137,6 +189,7 @@ export function VoiceControls({
           aria-label="Start voice call"
         >
           <IconPhone size={14} />
+          <span className={styles.callLabel}>Voice Call</span>
         </button>
       </div>
     )
@@ -158,8 +211,20 @@ export function VoiceControls({
   if (callState === 'ringing') {
     return (
       <div className={styles.wrapper}>
-        <div className={styles.banner}>
-          <span className={styles.bannerText}>Incoming voice call</span>
+        <div className={`${styles.banner} ${styles.incomingBanner}`}>
+          <span className={`${styles.bannerText} ${styles.incomingText}`}>
+            Incoming voice call. Choose Accept or Decline.
+          </span>
+          {ringtoneBlocked && (
+            <button
+              className={styles.enableRingtoneButton}
+              onClick={handleEnableRingtone}
+              title="Enable ringtone"
+              aria-label="Enable ringtone"
+            >
+              Enable ringtone
+            </button>
+          )}
           <button
             className={styles.acceptButton}
             onClick={handleAcceptCallClick}
