@@ -136,6 +136,15 @@
   border-color: var(--error);
 }
 
+.sizeLimitWarning {
+  font-size: 0.75rem;
+  color: var(--error);
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  animation: recordingPulse 1.2s ease-in-out infinite;
+}
+
 .voiceNoteError {
   font-size: 0.75rem;
   color: var(--error);

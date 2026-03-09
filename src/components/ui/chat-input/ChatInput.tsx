@@ -14,6 +14,7 @@ interface ChatInputProps {
   onStopRecording?: () => void
   onCancelRecording?: () => void
   voiceNoteError?: string | null
+  voiceNoteSizeWarningSeconds?: number | null
 }
 
 const TYPING_TIMEOUT = 5_000
@@ -36,18 +37,20 @@ export function ChatInput({
   onStopRecording,
   onCancelRecording,
   voiceNoteError,
+  voiceNoteSizeWarningSeconds,
 }: ChatInputProps) {
   const [text, setText] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const isTypingRef = useRef(false)
   const textRef = useRef('')
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const canAutoFocus = !disabled && !isRecording
 
   useEffect(() => {
-    if (!disabled && !isRecording && textareaRef.current) {
+    if (canAutoFocus && textareaRef.current) {
       textareaRef.current.focus()
     }
-  }, [disabled, isRecording])
+  }, [canAutoFocus])
 
   useEffect(() => {
     return () => {
@@ -123,6 +126,11 @@ export function ChatInput({
           <div className={styles.recordingBar}>
             <span className={styles.recordingDot} />
             <span className={styles.recordingTimer}>{formatRecordingTime(recordingDuration)}</span>
+            {voiceNoteSizeWarningSeconds !== undefined && voiceNoteSizeWarningSeconds !== null && (
+              <span className={styles.sizeLimitWarning}>
+                limit in {voiceNoteSizeWarningSeconds}s
+              </span>
+            )}
           </div>
           <button
             className={styles.sendButton}
