@@ -17,6 +17,7 @@ import {
   IconCopy,
   IconCheck,
   IconGear,
+  OnOffToggle,
 } from '@/components';
 import {
   MAX_MESSAGE_LENGTH,
@@ -321,10 +322,11 @@ function ChatView({
   const [pendingSafeWord, setPendingSafeWord] = useState('');
   const [pendingUsernameMode, setPendingUsernameMode] = useState(roomSettings.usernameModeEnabled);
   const [settingsError, setSettingsError] = useState<string | null>(null);
-  const [savingSettings, setSavingSettings] = useState(false);
+  const [applyingSafeWord, setApplyingSafeWord] = useState(false);
   const [pendingUsername, setPendingUsername] = useState('');
   const [usernameBusy, setUsernameBusy] = useState(false);
   const [usernameError, setUsernameError] = useState<string | null>(null);
+  const safeWordDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const voiceNoteChunksRef = useRef<Blob[]>([]);
@@ -366,10 +368,6 @@ function ChatView({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length]);
 
-  useEffect(() => {
-    setPendingSafeWordEnabled(Boolean(roomSettings.safeWord));
-    setPendingUsernameMode(roomSettings.usernameModeEnabled);
-  }, [roomSettings]);
 
   useEffect(() => {
     if (localUsername) {
@@ -379,6 +377,9 @@ function ChatView({
 
   useEffect(() => {
     return () => {
+      if (safeWordDebounceRef.current) {
+        clearTimeout(safeWordDebounceRef.current);
+      }
       if (voiceNoteAutoStopRef.current) {
         clearTimeout(voiceNoteAutoStopRef.current);
       }
@@ -520,47 +521,80 @@ function ChatView({
     setVoiceNoteError(null);
   }, [clearVoiceNoteRecorder]);
 
-  const saveRoomSettings = useCallback(async () => {
-    if (!onUpdateRoomSettings || savingSettings) return;
-    if (pendingSafeWordEnabled && !roomSettings.safeWord && pendingSafeWord.trim().length === 0) {
-      setSettingsError('Safe word is required when enabled.');
-      return;
+  const clearSafeWordDebounce = useCallback(() => {
+    if (safeWordDebounceRef.current) {
+      clearTimeout(safeWordDebounceRef.current);
+      safeWordDebounceRef.current = null;
     }
-    setSavingSettings(true);
+  }, []);
+
+  const applySafeWord = useCallback(async (word: string) => {
+    if (!onUpdateRoomSettings) return;
+    setApplyingSafeWord(true);
     setSettingsError(null);
     try {
-      const nextSafeWord = pendingSafeWordEnabled
-        ? (
-          roomSettings.safeWord && pendingSafeWord.trim().length === 0
-            ? roomSettings.safeWord
-            : await createSafeWordSettings(pendingSafeWord.trim())
-        )
-        : null;
-
-      if (pendingSafeWordEnabled && !nextSafeWord) {
-        setSettingsError('Safe word is required when enabled.');
-        return;
-      }
-
+      const safeWord = await createSafeWordSettings(word);
       onUpdateRoomSettings({
         usernameModeEnabled: pendingUsernameMode,
-        safeWord: nextSafeWord,
+        safeWord,
       });
       setPendingSafeWord('');
-      setSettingsOpen(false);
     } catch {
-      setSettingsError('Failed to save room settings.');
+      setSettingsError('Failed to apply safe word.');
     } finally {
-      setSavingSettings(false);
+      setApplyingSafeWord(false);
     }
-  }, [
-    onUpdateRoomSettings,
-    pendingSafeWord,
-    pendingSafeWordEnabled,
-    pendingUsernameMode,
-    roomSettings.safeWord,
-    savingSettings,
-  ]);
+  }, [onUpdateRoomSettings, pendingUsernameMode]);
+
+  const debounceSafeWord = useCallback((word: string) => {
+    clearSafeWordDebounce();
+    safeWordDebounceRef.current = setTimeout(() => {
+      const trimmed = word.trim();
+      if (!trimmed || !pendingSafeWordEnabled) return;
+      void applySafeWord(trimmed);
+    }, 800);
+  }, [applySafeWord, clearSafeWordDebounce, pendingSafeWordEnabled]);
+
+  const toggleUsernameMode = useCallback(() => {
+    const next = !pendingUsernameMode;
+    setPendingUsernameMode(next);
+    onUpdateRoomSettings?.({
+      usernameModeEnabled: next,
+      safeWord: roomSettings.safeWord,
+    });
+  }, [onUpdateRoomSettings, pendingUsernameMode, roomSettings.safeWord]);
+
+  const toggleSafeWord = useCallback(() => {
+    const next = !pendingSafeWordEnabled;
+    setPendingSafeWordEnabled(next);
+    setSettingsError(null);
+    if (!next) {
+      clearSafeWordDebounce();
+      setPendingSafeWord('');
+      onUpdateRoomSettings?.({
+        usernameModeEnabled: pendingUsernameMode,
+        safeWord: null,
+      });
+    } else if (roomSettings.safeWord) {
+      onUpdateRoomSettings?.({
+        usernameModeEnabled: pendingUsernameMode,
+        safeWord: roomSettings.safeWord,
+      });
+    }
+  }, [clearSafeWordDebounce, onUpdateRoomSettings, pendingSafeWordEnabled, pendingUsernameMode, roomSettings.safeWord]);
+
+  const handleSafeWordInput = useCallback((value: string) => {
+    setPendingSafeWord(value);
+    debounceSafeWord(value);
+  }, [debounceSafeWord]);
+
+  const flushPendingSafeWord = useCallback(() => {
+    clearSafeWordDebounce();
+    const trimmed = pendingSafeWord.trim();
+    if (trimmed && pendingSafeWordEnabled) {
+      void applySafeWord(trimmed);
+    }
+  }, [applySafeWord, clearSafeWordDebounce, pendingSafeWord, pendingSafeWordEnabled]);
 
   const submitUsername = useCallback(async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -608,14 +642,32 @@ function ChatView({
                 tabIndex={0}
               >
                 <code className={styles.urlText}>{inviteUrl}</code>
-                <button
-                  type='button'
-                  className={styles.copyIcon}
-                  onClick={handleCopy}
-                  title={copied ? 'copied' : 'copy to clipboard'}
-                >
-                  {copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
-                </button>
+                <div className={styles.inviteActions}>
+                  <button
+                    type='button'
+                    className={styles.copyIcon}
+                    onClick={handleCopy}
+                    title={copied ? 'copied' : 'copy to clipboard'}
+                  >
+                    {copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
+                  </button>
+                  {onUpdateRoomSettings && (
+                    <button
+                      type='button'
+                      className={`${styles.gearButton} ${settingsOpen ? styles.gearButtonActive : ''}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSettingsOpen((prev) => {
+                          if (prev) flushPendingSafeWord();
+                          return !prev;
+                        });
+                      }}
+                      title='Chat room settings'
+                    >
+                      <IconGear size={14} />
+                    </button>
+                  )}
+                </div>
                 {copied && (
                   <span
                     className={`${styles.copiedHint} ${copyState === 'fading' ? styles.copiedHintFading : ''}`}
@@ -628,54 +680,47 @@ function ChatView({
           )}
           {onUpdateRoomSettings && (
             <div className={styles.settingsSection}>
-              <button
-                type='button'
-                className={`${styles.gearButton} ${settingsOpen ? styles.gearButtonActive : ''}`}
-                onClick={() => setSettingsOpen((prev) => !prev)}
-                title='Chat room settings'
-              >
-                <IconGear size={18} />
-              </button>
+              {!settingsOpen && (roomSettings.safeWord || roomSettings.usernameModeEnabled) && (
+                <div className={styles.activeSettings}>
+                  {roomSettings.safeWord && (
+                    <span className={styles.activeSettingTag}>Safe word agreement</span>
+                  )}
+                  {roomSettings.usernameModeEnabled && (
+                    <span className={styles.activeSettingTag}>Username mode</span>
+                  )}
+                </div>
+              )}
               {settingsOpen && (
                 <div className={styles.settingsPanel}>
                   <div className={styles.settingsRow}>
                     <label className={styles.settingsLabel}>Safe word agreement</label>
-                    <button
-                      type='button'
-                      className={styles.settingsToggle}
-                      onClick={() => setPendingSafeWordEnabled((prev) => !prev)}
-                    >
-                      {pendingSafeWordEnabled ? 'On' : 'Off'}
-                    </button>
+                    <OnOffToggle
+                      enabled={pendingSafeWordEnabled}
+                      onToggle={toggleSafeWord}
+                    />
                   </div>
                   {pendingSafeWordEnabled && (
-                    <input
-                      type='password'
-                      className={styles.settingsInput}
-                      value={pendingSafeWord}
-                      onChange={(event) => setPendingSafeWord(event.target.value)}
-                      placeholder={roomSettings.safeWord ? 'Keep existing safe word' : 'Enter safe word'}
-                    />
+                    <>
+                      <input
+                        type='password'
+                        className={styles.settingsInput}
+                        value={pendingSafeWord}
+                        onChange={(event) => handleSafeWordInput(event.target.value)}
+                        placeholder={roomSettings.safeWord ? 'Keep existing safe word' : 'Enter safe word'}
+                      />
+                      {applyingSafeWord && (
+                        <p className={styles.settingsHint}>Applying...</p>
+                      )}
+                    </>
                   )}
                   <div className={styles.settingsRow}>
                     <label className={styles.settingsLabel}>Username mode</label>
-                    <button
-                      type='button'
-                      className={styles.settingsToggle}
-                      onClick={() => setPendingUsernameMode((prev) => !prev)}
-                    >
-                      {pendingUsernameMode ? 'On' : 'Off'}
-                    </button>
+                    <OnOffToggle
+                      enabled={pendingUsernameMode}
+                      onToggle={toggleUsernameMode}
+                    />
                   </div>
                   {settingsError && <p className={styles.settingsError}>{settingsError}</p>}
-                  <button
-                    type='button'
-                    className={styles.settingsSave}
-                    disabled={savingSettings}
-                    onClick={() => void saveRoomSettings()}
-                  >
-                    {savingSettings ? 'Saving...' : 'Save settings'}
-                  </button>
                 </div>
               )}
             </div>
