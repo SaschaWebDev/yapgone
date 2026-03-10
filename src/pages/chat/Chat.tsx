@@ -323,6 +323,8 @@ function ChatView({
   const [pendingUsernameMode, setPendingUsernameMode] = useState(roomSettings.usernameModeEnabled);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [applyingSafeWord, setApplyingSafeWord] = useState(false);
+  const [safeWordApplied, setSafeWordApplied] = useState(false);
+  const safeWordAppliedRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pendingUsername, setPendingUsername] = useState('');
   const [usernameBusy, setUsernameBusy] = useState(false);
   const [usernameError, setUsernameError] = useState<string | null>(null);
@@ -379,6 +381,9 @@ function ChatView({
     return () => {
       if (safeWordDebounceRef.current) {
         clearTimeout(safeWordDebounceRef.current);
+      }
+      if (safeWordAppliedRef.current) {
+        clearTimeout(safeWordAppliedRef.current);
       }
       if (voiceNoteAutoStopRef.current) {
         clearTimeout(voiceNoteAutoStopRef.current);
@@ -539,6 +544,9 @@ function ChatView({
         safeWord,
       });
       setPendingSafeWord('');
+      setSafeWordApplied(true);
+      if (safeWordAppliedRef.current) clearTimeout(safeWordAppliedRef.current);
+      safeWordAppliedRef.current = setTimeout(() => setSafeWordApplied(false), 2000);
     } catch {
       setSettingsError('Failed to apply safe word.');
     } finally {
@@ -568,6 +576,7 @@ function ChatView({
     const next = !pendingSafeWordEnabled;
     setPendingSafeWordEnabled(next);
     setSettingsError(null);
+    setSafeWordApplied(false);
     if (!next) {
       clearSafeWordDebounce();
       setPendingSafeWord('');
@@ -585,6 +594,7 @@ function ChatView({
 
   const handleSafeWordInput = useCallback((value: string) => {
     setPendingSafeWord(value);
+    setSafeWordApplied(false);
     debounceSafeWord(value);
   }, [debounceSafeWord]);
 
@@ -710,6 +720,9 @@ function ChatView({
                       />
                       {applyingSafeWord && (
                         <p className={styles.settingsHint}>Applying...</p>
+                      )}
+                      {safeWordApplied && !applyingSafeWord && (
+                        <p className={styles.settingsHintSuccess}>Safe word set</p>
                       )}
                     </>
                   )}

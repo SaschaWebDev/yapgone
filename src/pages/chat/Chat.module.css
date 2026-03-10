@@ -334,6 +334,11 @@
   color: var(--text-secondary);
 }
 
+.settingsHintSuccess {
+  font-size: 0.78rem;
+  color: var(--success);
+}
+
 .activeSettings {
   display: flex;
   flex-wrap: wrap;
