@@ -1,0 +1,50 @@
+.toggle {
+  position: relative;
+  display: inline-flex;
+  vertical-align: middle;
+  background: rgba(var(--fg), 0.05);
+  border: 1px solid rgba(var(--fg), 0.08);
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.slider {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: calc(100% / 2 - 2px);
+  height: calc(100% - 6px);
+  background: rgba(var(--accent-rgb), 0.15);
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
+  border-radius: 6px;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
+}
+
+.option {
+  position: relative;
+  z-index: 1;
+  padding: 5px 14px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  font-family: inherit;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: rgba(var(--fg), 0.35);
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.option:hover:not(:disabled) {
+  color: rgba(var(--fg), 0.6);
+}
+
+.optionActive {
+  color: var(--accent);
+}
+
+.option:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
