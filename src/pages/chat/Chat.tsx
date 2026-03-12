@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback, type FormEvent } from 'react';
 import chatBubbleStyles from '@/components/ui/message-bubble/MessageBubble.module.css';
-import { useChatAsCreator, useChatAsJoiner, useVoiceCall, useNotifications, useLocalChatSettings, useInactivityTimer } from '@/hooks';
+import { useChatAsCreator, useChatAsJoiner, useVoiceCall, useNotifications, useLocalChatSettings, useInactivityTimer, useRecentEmojis } from '@/hooks';
 import type { VoiceSignal } from '@/types';
 import type { ChatMessage } from '@/hooks/use-chat';
 import type { ConnectionQuality } from '@/components/ui/status-badge/StatusBadge';
@@ -286,6 +286,31 @@ function deriveConnectionQuality(phase: string, msgs: ChatMessage[]): Connection
   return 'good'
 }
 
+async function computeWaveform(blob: Blob): Promise<number[]> {
+  try {
+    const arrayBuffer = await blob.arrayBuffer();
+    const audioCtx = new AudioContext();
+    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+    const data = audioBuffer.getChannelData(0);
+    const barCount = 40;
+    const step = Math.floor(data.length / barCount);
+    const peaks: number[] = [];
+    for (let i = 0; i < barCount; i++) {
+      let max = 0;
+      for (let j = 0; j < step; j++) {
+        const v = Math.abs(data[i * step + j] ?? 0);
+        if (v > max) max = v;
+      }
+      peaks.push(max);
+    }
+    const maxPeak = Math.max(...peaks, 0.01);
+    await audioCtx.close();
+    return peaks.map((p) => p / maxPeak);
+  } catch {
+    return Array.from({ length: 40 }, () => 0.5);
+  }
+}
+
 interface VoiceState {
   callState: import('@/types').CallState;
   isMuted: boolean;
@@ -293,11 +318,16 @@ interface VoiceState {
   privacyAcknowledged: boolean;
   isScreenSharing: boolean;
   remoteScreenStream: MediaStream | null;
+  isDeafened: boolean;
+  isE2eeEnabled: boolean;
+  isReconnecting: boolean;
   startCall: () => void;
   acceptCall: () => Promise<void>;
   declineCall: () => void;
   endCall: () => void;
   toggleMute: () => void;
+  toggleDeafen: () => void;
+  toggleE2ee: () => void;
   acknowledgePrivacy: () => void;
   resetCallState: () => void;
   startScreenShare: () => Promise<void>;
@@ -356,6 +386,10 @@ function ChatView({
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [voiceNoteSizeWarningSeconds, setVoiceNoteSizeWarningSeconds] = useState<number | null>(null);
   const [voiceNoteTimeWarningSeconds, setVoiceNoteTimeWarningSeconds] = useState<number | null>(null);
+  const [isRecordingPaused, setIsRecordingPaused] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewDurationMs, setPreviewDurationMs] = useState(0);
+  const [previewWaveform, setPreviewWaveform] = useState<number[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pendingSafeWordEnabled, setPendingSafeWordEnabled] = useState(Boolean(roomSettings.safeWord));
   const [pendingSafeWord, setPendingSafeWord] = useState('');
@@ -380,6 +414,9 @@ function ChatView({
   const voiceNoteStreamRef = useRef<MediaStream | null>(null);
   const voiceNoteAutoStopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const accumulatedBytesRef = useRef(0);
+  const pauseStartedAtRef = useRef<number | null>(null);
+  const totalPausedMsRef = useRef(0);
+  const autoStopRemainingMsRef = useRef(VOICE_NOTE_MAX_DURATION_MS);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageListRef = useRef<HTMLDivElement>(null);
   const prevMessageCountRef = useRef(messages.length);
@@ -387,6 +424,7 @@ function ChatView({
   const copied = copyState !== 'idle';
 
   const { settings: localSettings, updateSetting } = useLocalChatSettings();
+  const { recentEmojis, trackEmoji } = useRecentEmojis();
 
   const { remainingSeconds, resetTimer } = useInactivityTimer(ROOM_INACTIVITY_TTL_MS);
 
@@ -464,8 +502,9 @@ function ChatView({
     const msg = messages.find(m => m.id === msgId);
     if (!msg) return;
     const alreadyReacted = msg.reactions.some(r => r.emoji === emoji && r.fromSelf);
+    trackEmoji(emoji);
     onReact(msgId, emoji, alreadyReacted ? 'remove' : 'add');
-  }, [messages, onReact]);
+  }, [messages, onReact, trackEmoji]);
 
   const newChatButton = (
     <button className={styles.restartLink} onClick={handleNewChat}>
@@ -567,6 +606,15 @@ function ChatView({
     };
   }, []);
 
+  // Revoke preview URL on unmount
+  useEffect(() => {
+    return () => {
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+      }
+    };
+  }, [previewUrl]);
+
   const clearVoiceNoteRecorder = useCallback(() => {
     if (voiceNoteAutoStopRef.current) {
       clearTimeout(voiceNoteAutoStopRef.current);
@@ -584,32 +632,23 @@ function ChatView({
     voiceNoteChunksRef.current = [];
     voiceNoteStartedAtRef.current = null;
     accumulatedBytesRef.current = 0;
+    pauseStartedAtRef.current = null;
+    totalPausedMsRef.current = 0;
+    autoStopRemainingMsRef.current = VOICE_NOTE_MAX_DURATION_MS;
     setIsRecordingNote(false);
+    setIsRecordingPaused(false);
     setRecordingDuration(0);
     setVoiceNoteSizeWarningSeconds(null);
     setVoiceNoteTimeWarningSeconds(null);
+    // Clear preview state
+    setPreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+    setPreviewDurationMs(0);
+    setPreviewWaveform([]);
   }, []);
 
-  const finalizeVoiceNote = useCallback(() => {
-    const recorder = mediaRecorderRef.current;
-    const startedAt = voiceNoteStartedAtRef.current ?? Date.now();
-    const durationMs = Math.max(0, Date.now() - startedAt);
-    const mimeType = recorder?.mimeType || 'audio/webm';
-    const blob = new Blob(voiceNoteChunksRef.current, { type: mimeType });
-
-    clearVoiceNoteRecorder();
-    setIsSendingVoiceNote(true);
-
-    if (durationMs === 0 || blob.size === 0) {
-      setVoiceNoteError('Voice note is empty');
-      setIsSendingVoiceNote(false);
-      return;
-    }
-    onSendVoiceNote(blob, durationMs, mimeType)
-      .then(() => setVoiceNoteError(null))
-      .catch(() => setVoiceNoteError('Failed to send voice note'))
-      .finally(() => setIsSendingVoiceNote(false));
-  }, [clearVoiceNoteRecorder, onSendVoiceNote]);
 
   const startVoiceNoteRecording = useCallback(async () => {
     if (isRecordingNote || isSendingVoiceNote) return;
@@ -628,13 +667,16 @@ function ChatView({
       voiceNoteChunksRef.current = [];
       voiceNoteStartedAtRef.current = Date.now();
       accumulatedBytesRef.current = 0;
+      pauseStartedAtRef.current = null;
+      totalPausedMsRef.current = 0;
+      autoStopRemainingMsRef.current = VOICE_NOTE_MAX_DURATION_MS;
 
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           voiceNoteChunksRef.current.push(event.data);
           accumulatedBytesRef.current += event.data.size;
 
-          const elapsedMs = Date.now() - (voiceNoteStartedAtRef.current ?? Date.now());
+          const elapsedMs = Date.now() - (voiceNoteStartedAtRef.current ?? Date.now()) - totalPausedMsRef.current;
           const elapsedSeconds = elapsedMs / 1000;
           if (elapsedSeconds > 0) {
             const bytesPerSecond = accumulatedBytesRef.current / elapsedSeconds;
@@ -654,7 +696,24 @@ function ChatView({
         }
       };
 
-      recorder.onstop = finalizeVoiceNote;
+      recorder.onstop = () => {
+        const mimeType = recorder.mimeType || 'audio/webm';
+        const blob = new Blob(voiceNoteChunksRef.current, { type: mimeType });
+        const durationMs = Math.max(0, Date.now() - (voiceNoteStartedAtRef.current ?? Date.now()) - totalPausedMsRef.current);
+
+        clearVoiceNoteRecorder();
+
+        if (durationMs === 0 || blob.size === 0) {
+          setVoiceNoteError('Voice note is empty');
+          return;
+        }
+
+        setIsSendingVoiceNote(true);
+        onSendVoiceNote(blob, durationMs, mimeType)
+          .then(() => setVoiceNoteError(null))
+          .catch(() => setVoiceNoteError('Failed to send voice note'))
+          .finally(() => setIsSendingVoiceNote(false));
+      };
 
       recorder.onerror = () => {
         setVoiceNoteError('Voice note recording failed');
@@ -677,32 +736,118 @@ function ChatView({
         });
       }, 1000);
       voiceNoteAutoStopRef.current = setTimeout(() => {
-        if (mediaRecorderRef.current?.state === 'recording') {
-          mediaRecorderRef.current.stop();
+        const rec = mediaRecorderRef.current;
+        if (rec && rec.state !== 'inactive') {
+          if (rec.state === 'paused') rec.resume();
+          rec.stop();
         }
       }, VOICE_NOTE_MAX_DURATION_MS);
     } catch {
       setVoiceNoteError('Microphone permission denied');
       clearVoiceNoteRecorder();
     }
-  }, [clearVoiceNoteRecorder, finalizeVoiceNote, isRecordingNote, isSendingVoiceNote]);
+  }, [clearVoiceNoteRecorder, onSendVoiceNote, isRecordingNote, isSendingVoiceNote]);
 
   const stopVoiceNoteRecording = useCallback(() => {
     const recorder = mediaRecorderRef.current;
-    if (!recorder || recorder.state !== 'recording') return;
+    if (!recorder || recorder.state === 'inactive') return;
+    // If paused, resume before stopping to flush final data
+    if (recorder.state === 'paused') {
+      // Accumulate paused time before resuming
+      if (pauseStartedAtRef.current !== null) {
+        totalPausedMsRef.current += Date.now() - pauseStartedAtRef.current;
+        pauseStartedAtRef.current = null;
+      }
+      recorder.resume();
+    }
     recorder.stop();
   }, []);
+
+  const togglePauseRecording = useCallback(async () => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder) return;
+
+    if (recorder.state === 'recording') {
+      // Pause
+      recorder.pause();
+      pauseStartedAtRef.current = Date.now();
+      // Save remaining auto-stop time
+      if (voiceNoteAutoStopRef.current) {
+        clearTimeout(voiceNoteAutoStopRef.current);
+        voiceNoteAutoStopRef.current = null;
+      }
+      // Freeze the interval timer
+      if (recordingIntervalRef.current) {
+        clearInterval(recordingIntervalRef.current);
+        recordingIntervalRef.current = null;
+      }
+
+      // Compute waveform and preview URL from recorded chunks so far
+      const mimeType = recorder.mimeType || 'audio/webm';
+      const blob = new Blob(voiceNoteChunksRef.current, { type: mimeType });
+      const durationMs = Math.max(0, Date.now() - (voiceNoteStartedAtRef.current ?? Date.now()) - totalPausedMsRef.current);
+
+      const waveform = await computeWaveform(blob);
+      const url = URL.createObjectURL(blob);
+      setPreviewUrl(url);
+      setPreviewDurationMs(durationMs);
+      setPreviewWaveform(waveform);
+
+      setIsRecordingPaused(true);
+    } else if (recorder.state === 'paused') {
+      // Resume — clear preview state
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      setPreviewUrl(null);
+      setPreviewDurationMs(0);
+      setPreviewWaveform([]);
+
+      if (pauseStartedAtRef.current !== null) {
+        totalPausedMsRef.current += Date.now() - pauseStartedAtRef.current;
+        pauseStartedAtRef.current = null;
+      }
+      recorder.resume();
+      // Restart interval timer
+      recordingIntervalRef.current = setInterval(() => {
+        setRecordingDuration((prev) => {
+          const next = prev + 1;
+          const remainingS = (VOICE_NOTE_MAX_DURATION_MS / 1000) - next;
+          if (remainingS <= VOICE_NOTE_DURATION_WARNING_THRESHOLD_S && remainingS > 0) {
+            setVoiceNoteTimeWarningSeconds(remainingS);
+          } else {
+            setVoiceNoteTimeWarningSeconds(null);
+          }
+          return next;
+        });
+      }, 1000);
+      // Recalculate auto-stop from remaining recording time
+      const elapsedRecordingMs = Date.now() - (voiceNoteStartedAtRef.current ?? Date.now()) - totalPausedMsRef.current;
+      const remainingMs = Math.max(0, VOICE_NOTE_MAX_DURATION_MS - elapsedRecordingMs);
+      voiceNoteAutoStopRef.current = setTimeout(() => {
+        const rec = mediaRecorderRef.current;
+        if (rec && rec.state !== 'inactive') {
+          if (rec.state === 'paused') rec.resume();
+          rec.stop();
+        }
+      }, remainingMs);
+      setIsRecordingPaused(false);
+    }
+  }, [previewUrl]);
 
   const cancelVoiceNoteRecording = useCallback(() => {
     const recorder = mediaRecorderRef.current;
     if (recorder && recorder.state !== 'inactive') {
       recorder.ondataavailable = null;
       recorder.onstop = null;
+      if (recorder.state === 'paused') recorder.resume();
       recorder.stop();
     }
     clearVoiceNoteRecorder();
     setVoiceNoteError(null);
-  }, [clearVoiceNoteRecorder]);
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(null);
+    setPreviewDurationMs(0);
+    setPreviewWaveform([]);
+  }, [clearVoiceNoteRecorder, previewUrl]);
 
   const clearSafeWordDebounce = useCallback(() => {
     if (safeWordDebounceRef.current) {
@@ -819,11 +964,11 @@ function ChatView({
         <div className={styles.centered}>
           <p className={styles.status}>Waiting for partner...</p>
           {inviteUrl && (
-            <div className={styles.inviteRow}>
-              <div className={styles.inviteSection}>
-                <p className={styles.inviteLabel}>
-                  Share this link with your partner:
-                </p>
+            <>
+              <p className={styles.inviteLabel}>
+                Share this link with your partner:
+              </p>
+              <div className={styles.inviteRow}>
                 <div
                   className={`${styles.inviteBox} ${copied ? styles.inviteBoxCopied : ''}`}
                   onClick={handleCopy}
@@ -865,9 +1010,9 @@ function ChatView({
                     </span>
                   )}
                 </div>
+                <QrCode url={inviteUrl} />
               </div>
-              <QrCode url={inviteUrl} size={140} />
-            </div>
+            </>
           )}
           {onUpdateRoomSettings && (
             <div className={styles.settingsSection}>
@@ -1138,11 +1283,16 @@ function ChatView({
           callDuration={voice.callDuration}
           privacyAcknowledged={voice.privacyAcknowledged}
           isScreenSharing={voice.isScreenSharing}
+          isDeafened={voice.isDeafened}
+          isE2eeEnabled={voice.isE2eeEnabled}
+          isReconnecting={voice.isReconnecting}
           onStartCall={voice.startCall}
           onAcceptCall={voice.acceptCall}
           onDeclineCall={voice.declineCall}
           onEndCall={voice.endCall}
           onToggleMute={voice.toggleMute}
+          onToggleDeafen={voice.toggleDeafen}
+          onToggleE2ee={voice.toggleE2ee}
           onAcknowledgePrivacy={voice.acknowledgePrivacy}
           onResetCallState={voice.resetCallState}
           onStartScreenShare={voice.startScreenShare}
@@ -1173,6 +1323,7 @@ function ChatView({
               reactions={msg.reactions}
               replyTo={msg.replyTo}
               replyPreview={msg.replyPreview}
+              recentEmojis={recentEmojis}
               onReact={isReady ? (emoji) => handleReact(msg.id, emoji) : undefined}
               onReply={isReady ? () => { setReplyingTo(msg); setInputFocusTrigger(c => c + 1); } : undefined}
               onReplyClick={msg.replyTo ? () => scrollToMessage(msg.replyTo!) : undefined}
@@ -1227,6 +1378,11 @@ function ChatView({
         onCancelRecording={cancelVoiceNoteRecording}
         voiceNoteError={voiceNoteError}
         voiceNoteSizeWarningSeconds={effectiveWarningSeconds}
+        isRecordingPaused={isRecordingPaused}
+        onTogglePauseRecording={togglePauseRecording}
+        previewAudioUrl={previewUrl}
+        previewDurationMs={previewDurationMs}
+        previewWaveform={previewWaveform}
       />
       {usernameModeEnabled && !localUsername && (
         <div className={styles.usernameModalBackdrop}>
