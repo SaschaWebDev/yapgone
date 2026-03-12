@@ -3,7 +3,7 @@ import { z } from 'zod'
 
 const MAX_CLIENTS = 2
 const INACTIVITY_TTL_MS = 30 * 60 * 1000
-const MAX_MESSAGE_SIZE = 8192
+const MAX_MESSAGE_SIZE = 32768
 const MAX_MESSAGES_PER_SECOND = 60
 
 const SERVER_RESERVED_TYPES = new Set([

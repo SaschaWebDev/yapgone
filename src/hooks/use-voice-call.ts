@@ -67,6 +67,10 @@ export function _canEnterRingingOnIncoming(callState: CallState): boolean {
   return callState === 'idle' || callState === 'ended' || callState === 'failed' || callState === 'requesting'
 }
 
+export function _canToggleE2ee(callState: CallState, isReconnecting: boolean): boolean {
+  return callState === 'active' && !isReconnecting
+}
+
 export function useVoiceCall({
   sendSignal,
   onSignalRef,
@@ -79,6 +83,9 @@ export function useVoiceCall({
   const [privacyAcknowledged, setPrivacyAcknowledged] = useState(false)
   const [isScreenSharing, setIsScreenSharing] = useState(false)
   const [remoteScreenStream, setRemoteScreenStream] = useState<MediaStream | null>(null)
+  const [isDeafened, setIsDeafened] = useState(false)
+  const [isE2eeEnabled, setIsE2eeEnabled] = useState(VOICE_E2EE_ENABLED)
+  const [isReconnecting, setIsReconnecting] = useState(false)
 
   const pcRef = useRef<RTCPeerConnection | null>(null)
   const localStreamRef = useRef<MediaStream | null>(null)
@@ -96,6 +103,8 @@ export function useVoiceCall({
   const screenStreamRef = useRef<MediaStream | null>(null)
   const screenSenderRef = useRef<RTCRtpSender | null>(null)
   const mediaKeyRawRef = useRef<Uint8Array | null>(mediaKeyRaw)
+  const e2eeEnabledRef = useRef(VOICE_E2EE_ENABLED)
+  const reconnectingRef = useRef(false)
 
   stateRef.current = callState
   mediaKeyRawRef.current = mediaKeyRaw
@@ -159,8 +168,13 @@ export function useVoiceCall({
     pendingOfferRef.current = null
     pendingAnswerRef.current = null
     setIsMuted(false)
+    setIsDeafened(false)
     setCallDuration(0)
     callStartRef.current = 0
+    e2eeEnabledRef.current = VOICE_E2EE_ENABLED
+    setIsE2eeEnabled(VOICE_E2EE_ENABLED)
+    reconnectingRef.current = false
+    setIsReconnecting(false)
     setCallState('failed')
   }, [sendSignal, clearConnectingTimeout, clearDisconnectedTimeout, cleanupScreenShare, terminateMediaWorkers])
 
@@ -189,8 +203,13 @@ export function useVoiceCall({
     pendingOfferRef.current = null
     pendingAnswerRef.current = null
     setIsMuted(false)
+    setIsDeafened(false)
     setCallDuration(0)
     callStartRef.current = 0
+    e2eeEnabledRef.current = VOICE_E2EE_ENABLED
+    setIsE2eeEnabled(VOICE_E2EE_ENABLED)
+    reconnectingRef.current = false
+    setIsReconnecting(false)
   }, [clearConnectingTimeout, clearDisconnectedTimeout, cleanupScreenShare, terminateMediaWorkers])
 
   const startDurationTimer = useCallback(() => {
@@ -224,7 +243,7 @@ export function useVoiceCall({
     target: RTCRtpSender | RTCRtpReceiver,
     direction: 'encrypt' | 'decrypt',
   ): void => {
-    if (!VOICE_E2EE_ENABLED) return
+    if (!e2eeEnabledRef.current) return
     if (!('createEncodedStreams' in target)) return
 
     const { readable, writable } = target.createEncodedStreams()
@@ -251,12 +270,28 @@ export function useVoiceCall({
   ): RTCRtpSender => {
     const sender = pc.addTrack(track, stream)
     attachTransform(sender, 'encrypt')
+
+    if (track.kind === 'audio') {
+      const transceiver = pc.getTransceivers().find(t => t.sender === sender)
+      if (transceiver && typeof transceiver.setCodecPreferences === 'function') {
+        const capabilities = RTCRtpReceiver.getCapabilities('audio')
+        if (capabilities) {
+          const opusCodecs = capabilities.codecs.filter(
+            c => c.mimeType.toLowerCase() === 'audio/opus',
+          )
+          if (opusCodecs.length > 0) {
+            transceiver.setCodecPreferences(opusCodecs)
+          }
+        }
+      }
+    }
+
     return sender
   }, [attachTransform])
 
   const createPeerConnection = useCallback(() => {
     const config: RTCConfiguration = { iceServers: ICE_SERVERS }
-    if (VOICE_E2EE_ENABLED) {
+    if (e2eeEnabledRef.current) {
       config.encodedInsertableStreams = true
     }
     const pc = new RTCPeerConnection(config)
@@ -295,6 +330,10 @@ export function useVoiceCall({
       const iceState = pc.iceConnectionState
       if (iceState === 'connected' || iceState === 'completed') {
         clearDisconnectedTimeout()
+        if (reconnectingRef.current) {
+          reconnectingRef.current = false
+          setIsReconnecting(false)
+        }
         if (stateRef.current === 'connecting') {
           clearConnectingTimeout()
           setCallState('active')
@@ -418,6 +457,72 @@ export function useVoiceCall({
     audioTrack.enabled = !audioTrack.enabled
     setIsMuted(!audioTrack.enabled)
   }, [])
+
+  const toggleDeafen = useCallback(() => {
+    if (!remoteAudioRef.current) return
+    remoteAudioRef.current.muted = !remoteAudioRef.current.muted
+    setIsDeafened(remoteAudioRef.current.muted)
+  }, [])
+
+  const softReconnect = useCallback(async (newE2ee: boolean, isToggler: boolean) => {
+    if (reconnectingRef.current) return
+    reconnectingRef.current = true
+    setIsReconnecting(true)
+
+    // Stop screen share if active
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach(t => t.stop())
+      screenStreamRef.current = null
+      screenSenderRef.current = null
+      setIsScreenSharing(false)
+    }
+
+    // Terminate media workers
+    terminateMediaWorkers()
+
+    // Close old PC
+    if (pcRef.current) {
+      pcRef.current.close()
+      pcRef.current = null
+    }
+
+    // Clear ICE buffers + pending SDP
+    prePcIceCandidatesRef.current = []
+    preRemoteDescIceCandidatesRef.current = []
+    pendingOfferRef.current = null
+    pendingAnswerRef.current = null
+
+    // Update e2ee ref
+    e2eeEnabledRef.current = newE2ee
+    setIsE2eeEnabled(newE2ee)
+
+    // Create new PC (reads new e2ee ref)
+    const pc = createPeerConnection()
+
+    // Re-add tracks from existing local stream (mic stays open)
+    const stream = localStreamRef.current
+    if (stream) {
+      stream.getTracks().forEach(t => addTrackWithTransform(pc, t, stream))
+    }
+
+    // If toggler: create offer. If receiver: wait for incoming offer
+    if (isToggler) {
+      try {
+        const offer = await pc.createOffer()
+        await pc.setLocalDescription(offer)
+        sendSignal({ kind: 'sdp-offer', sdp: JSON.stringify(offer) })
+      } catch {
+        // non-fatal — peer's offer will arrive
+      }
+    }
+  }, [terminateMediaWorkers, createPeerConnection, addTrackWithTransform, sendSignal])
+
+  const toggleE2ee = useCallback(() => {
+    if (!_canToggleE2ee(stateRef.current, reconnectingRef.current)) return
+    const newE2ee = !e2eeEnabledRef.current
+    sendSignal({ kind: 'e2ee-toggle', e2ee: newE2ee })
+    void softReconnect(newE2ee, true)
+  }, [sendSignal, softReconnect])
 
   const acknowledgePrivacy = useCallback(() => {
     setPrivacyAcknowledged(true)
@@ -604,6 +709,12 @@ export function useVoiceCall({
         setRemoteScreenStream(null)
         break
       }
+
+      case 'e2ee-toggle': {
+        if (!_canToggleE2ee(stateRef.current, reconnectingRef.current)) break
+        void softReconnect(signal.e2ee, false)
+        break
+      }
     }
   }, [
     acquireMedia,
@@ -614,6 +725,7 @@ export function useVoiceCall({
     createPeerConnection,
     sendSignal,
     cleanupCall,
+    softReconnect,
   ])
 
   // Register signal handler
@@ -662,11 +774,16 @@ export function useVoiceCall({
     privacyAcknowledged,
     isScreenSharing,
     remoteScreenStream,
+    isDeafened,
+    isE2eeEnabled,
+    isReconnecting,
     startCall,
     acceptCall,
     declineCall,
     endCall,
     toggleMute,
+    toggleDeafen,
+    toggleE2ee,
     acknowledgePrivacy,
     resetCallState,
     startScreenShare,

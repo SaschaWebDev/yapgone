@@ -77,6 +77,22 @@
   background: rgba(var(--accent-rgb, 99, 102, 241), 0.1);
 }
 
+.enableDialtoneButton {
+  background: none;
+  border: 1px solid rgba(var(--accent-rgb, 99, 102, 241), 0.45);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  padding: 0.2rem 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.enableDialtoneButton:hover {
+  background: rgba(var(--accent-rgb, 99, 102, 241), 0.1);
+}
+
 .duration {
   color: var(--text-primary);
   font-size: 0.85rem;
@@ -123,6 +139,64 @@
 
 .mutedButton:hover {
   background: rgba(var(--error-rgb, 239, 68, 68), 0.2);
+}
+
+.deafenButton {
+  composes: controlButton;
+  background: rgba(var(--fg), 0.06);
+  color: var(--text-secondary);
+}
+
+.deafenButton:hover {
+  background: rgba(var(--fg), 0.12);
+  color: var(--text-primary);
+}
+
+.deafenedButton {
+  composes: controlButton;
+  background: rgba(var(--error-rgb, 239, 68, 68), 0.1);
+  color: var(--error);
+}
+
+.deafenedButton:hover {
+  background: rgba(var(--error-rgb, 239, 68, 68), 0.2);
+}
+
+.e2eeOnButton {
+  composes: controlButton;
+  background: rgba(var(--success-rgb, 34, 197, 94), 0.12);
+  color: var(--success);
+}
+
+.e2eeOnButton:hover {
+  background: rgba(var(--success-rgb, 34, 197, 94), 0.22);
+}
+
+.e2eeOnButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.e2eeOffButton {
+  composes: controlButton;
+  background: rgba(255, 191, 0, 0.12);
+  color: #d4a017;
+}
+
+.e2eeOffButton:hover {
+  background: rgba(255, 191, 0, 0.22);
+}
+
+.e2eeOffButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.reconnectingText {
+  font-size: 0.72rem;
+  font-style: italic;
+  color: var(--text-secondary);
+  white-space: nowrap;
 }
 
 .screenShareButton {

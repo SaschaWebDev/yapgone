@@ -12,6 +12,9 @@ let aesKey: CryptoKey | null = null
 let frameCounter = 0
 const sessionSalt = crypto.getRandomValues(new Uint8Array(4))
 
+let keyReady: Promise<void> = Promise.resolve()
+let resolveKeyReady: (() => void) | null = null
+
 function writeUint32BE(value: number): Uint8Array {
   const buf = new Uint8Array(4)
   buf[0] = (value >>> 24) & 0xff
@@ -39,27 +42,35 @@ function buildIV(counter: number): Uint8Array {
   return iv
 }
 
+// TS 5.9+ types Uint8Array.buffer as ArrayBufferLike (includes SharedArrayBuffer)
+// but Web Crypto requires BufferSource (only ArrayBuffer). Copy to guarantee ArrayBuffer.
+function toAB(data: Uint8Array): ArrayBuffer {
+  const copy = new ArrayBuffer(data.byteLength)
+  new Uint8Array(copy).set(data)
+  return copy
+}
+
 type FrameController = { enqueue: (frame: { data: ArrayBuffer }) => void }
 
 function encryptFrame(frame: { data: ArrayBuffer }, controller: FrameController): void | Promise<void> {
   if (!aesKey) return // DROP — never send unencrypted audio
   const counter = frameCounter++
   const iv = buildIV(counter)
-  const counterBytes = writeUint32BE(counter)
 
-  const ivBuf = new ArrayBuffer(iv.byteLength)
-  new Uint8Array(ivBuf).set(iv)
   return crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv: ivBuf },
+    { name: 'AES-GCM', iv: toAB(iv) },
     aesKey,
     frame.data,
   ).then((encrypted) => {
-    const output = new ArrayBuffer(HEADER_SIZE + encrypted.byteLength)
-    const view = new Uint8Array(output)
-    view.set(counterBytes, 0)
-    view.set(iv, 4)
-    view.set(new Uint8Array(encrypted), HEADER_SIZE)
-    frame.data = output
+    const encView = new Uint8Array(encrypted)
+    const output = new Uint8Array(HEADER_SIZE + encView.byteLength)
+    output[0] = (counter >>> 24) & 0xff
+    output[1] = (counter >>> 16) & 0xff
+    output[2] = (counter >>> 8) & 0xff
+    output[3] = counter & 0xff
+    output.set(iv, 4)
+    output.set(encView, HEADER_SIZE)
+    frame.data = output.buffer
     controller.enqueue(frame)
   }).catch((err) => {
     console.error('[MediaCrypto:encrypt] Error:', err)
@@ -68,21 +79,15 @@ function encryptFrame(frame: { data: ArrayBuffer }, controller: FrameController)
 
 function decryptFrame(frame: { data: ArrayBuffer }, controller: FrameController): void | Promise<void> {
   if (!aesKey) return // DROP — encrypted data to Opus decoder = noise
+  if (frame.data.byteLength < HEADER_SIZE + GCM_TAG_SIZE) return // Too short
 
-  const frameData = new Uint8Array(frame.data)
-  if (frameData.byteLength < HEADER_SIZE + GCM_TAG_SIZE) return // Too short
-
-  const ivSlice = frameData.slice(4, 4 + IV_SIZE)
-  const ivBuf = new ArrayBuffer(ivSlice.byteLength)
-  new Uint8Array(ivBuf).set(ivSlice)
-  const ciphertextSlice = frameData.slice(HEADER_SIZE)
-  const ciphertextBuf = new ArrayBuffer(ciphertextSlice.byteLength)
-  new Uint8Array(ciphertextBuf).set(ciphertextSlice)
+  const iv = new Uint8Array(frame.data, 4, IV_SIZE)
+  const ciphertext = new Uint8Array(frame.data, HEADER_SIZE)
 
   return crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: ivBuf },
+    { name: 'AES-GCM', iv: toAB(iv) },
     aesKey,
-    ciphertextBuf,
+    toAB(ciphertext),
   ).then((decrypted) => {
     frame.data = decrypted
     controller.enqueue(frame)
@@ -113,37 +118,33 @@ function startPipeline(
   readable: ReadableStream<{ data: ArrayBuffer }>,
   writable: WritableStream<{ data: ArrayBuffer }>,
 ): void {
-  const transform = direction === 'encrypt' ? encryptFrame : decryptFrame
-
+  const transformFn = direction === 'encrypt' ? encryptFrame : decryptFrame
   console.log('[MediaCrypto] Pipeline starting, direction:', direction)
-  void (async () => {
-    const reader = readable.getReader()
-    const writer = writable.getWriter()
-    let count = 0
-    try {
-      for (;;) {
-        const result = await reader.read()
-        if (result.done) break
-        count++
-        if (count === 1 || count % 500 === 0) {
-          console.log(`[MediaCrypto:${direction}] frame #${count} size=${result.value.data.byteLength} hasKey=${!!aesKey}`)
-        }
-        let processed: { data: ArrayBuffer } | null = null
-        const ctrl: FrameController = { enqueue: (f) => { processed = f as { data: ArrayBuffer } } }
-        await transform(result.value, ctrl)
-        if (processed) await writer.write(processed)
+  let count = 0
+  let keyAwaited = false
+  const ts = new TransformStream<{ data: ArrayBuffer }, { data: ArrayBuffer }>({
+    async transform(frame, controller) {
+      if (!keyAwaited) {
+        await keyReady
+        keyAwaited = true
       }
-      await writer.close()
-    } catch (err) {
-      console.error('[MediaCrypto] Pipeline error, direction:', direction, err)
-    }
-  })()
+      count++
+      if (count === 1 || count % 500 === 0) {
+        console.log(`[MediaCrypto:${direction}] frame #${count} size=${frame.data.byteLength} hasKey=${!!aesKey}`)
+      }
+      return transformFn(frame, controller)
+    },
+  })
+  readable.pipeThrough(ts).pipeTo(writable).catch((err) => {
+    console.error('[MediaCrypto] Pipeline error, direction:', direction, err)
+  })
 }
 
 // Handle key delivery and stream setup via postMessage
 self.onmessage = async (event: MessageEvent) => {
   const msg = event.data as WorkerMessage
   if (msg.type === 'set-key' && msg.key) {
+    keyReady = new Promise<void>((resolve) => { resolveKeyReady = resolve })
     aesKey = await crypto.subtle.importKey(
       'raw',
       msg.key,
@@ -151,6 +152,7 @@ self.onmessage = async (event: MessageEvent) => {
       false,
       ['encrypt', 'decrypt'],
     )
+    if (resolveKeyReady) { resolveKeyReady(); resolveKeyReady = null }
   } else if (msg.type === 'start-transform') {
     startPipeline(msg.direction, msg.readable, msg.writable)
   }

@@ -20,6 +20,9 @@ var aesKey = null;
 var frameCounter = 0;
 var sessionSalt = crypto.getRandomValues(new Uint8Array(4));
 
+var keyReady = Promise.resolve();
+var resolveKeyReady = null;
+
 function writeUint32BE(value) {
   var b = new Uint8Array(4);
   b[0] = (value >>> 24) & 0xff;
@@ -41,20 +44,20 @@ function encryptFrame(frame, controller) {
   if (!aesKey) return; // DROP — never send unencrypted audio
   var counter = frameCounter++;
   var iv = buildIV(counter);
-  var counterBytes = writeUint32BE(counter);
-  var ivBuf = new ArrayBuffer(iv.byteLength);
-  new Uint8Array(ivBuf).set(iv);
   return crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv: ivBuf },
+    { name: 'AES-GCM', iv: iv },
     aesKey,
     frame.data
   ).then(function(encrypted) {
-    var output = new ArrayBuffer(HEADER_SIZE + encrypted.byteLength);
-    var view = new Uint8Array(output);
-    view.set(counterBytes, 0);
-    view.set(iv, 4);
-    view.set(new Uint8Array(encrypted), HEADER_SIZE);
-    frame.data = output;
+    var encView = new Uint8Array(encrypted);
+    var output = new Uint8Array(HEADER_SIZE + encView.byteLength);
+    output[0] = (counter >>> 24) & 0xff;
+    output[1] = (counter >>> 16) & 0xff;
+    output[2] = (counter >>> 8) & 0xff;
+    output[3] = counter & 0xff;
+    output.set(iv, 4);
+    output.set(encView, HEADER_SIZE);
+    frame.data = output.buffer;
     controller.enqueue(frame);
   }).catch(function(err) {
     console.error('[MediaCrypto:encrypt] Error:', err);
@@ -63,18 +66,13 @@ function encryptFrame(frame, controller) {
 
 function decryptFrame(frame, controller) {
   if (!aesKey) return; // DROP — encrypted data to Opus decoder = noise
-  var frameData = new Uint8Array(frame.data);
-  if (frameData.byteLength < HEADER_SIZE + GCM_TAG_SIZE) return; // too short
-  var ivSlice = frameData.slice(4, 4 + IV_SIZE);
-  var ivBuf = new ArrayBuffer(ivSlice.byteLength);
-  new Uint8Array(ivBuf).set(ivSlice);
-  var ciphertextSlice = frameData.slice(HEADER_SIZE);
-  var ciphertextBuf = new ArrayBuffer(ciphertextSlice.byteLength);
-  new Uint8Array(ciphertextBuf).set(ciphertextSlice);
+  if (frame.data.byteLength < HEADER_SIZE + GCM_TAG_SIZE) return; // too short
+  var iv = new Uint8Array(frame.data, 4, IV_SIZE);
+  var ciphertext = new Uint8Array(frame.data, HEADER_SIZE);
   return crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: ivBuf },
+    { name: 'AES-GCM', iv: iv },
     aesKey,
-    ciphertextBuf
+    ciphertext
   ).then(function(decrypted) {
     frame.data = decrypted;
     controller.enqueue(frame);
@@ -84,43 +82,48 @@ function decryptFrame(frame, controller) {
 }
 
 function startPipeline(direction, readable, writable) {
-  var transform = direction === 'encrypt' ? encryptFrame : decryptFrame;
+  var transformFn = direction === 'encrypt' ? encryptFrame : decryptFrame;
   console.log('[MediaCrypto] Pipeline starting, direction:', direction);
-  (async function() {
-    var reader = readable.getReader();
-    var writer = writable.getWriter();
-    var count = 0;
-    try {
-      while (true) {
-        var result = await reader.read();
-        if (result.done) break;
-        count++;
-        if (count === 1 || count % 500 === 0) {
-          console.log('[MediaCrypto:' + direction + '] frame #' + count +
-            ' size=' + result.value.data.byteLength + ' hasKey=' + !!aesKey);
-        }
-        var processed = null;
-        var ctrl = { enqueue: function(f) { processed = f; } };
-        await transform(result.value, ctrl);
-        if (processed) await writer.write(processed);
+  var count = 0;
+  var keyAwaited = false;
+  var ts = new TransformStream({
+    transform: function(frame, controller) {
+      if (!keyAwaited) {
+        return keyReady.then(function() {
+          keyAwaited = true;
+          count++;
+          if (count === 1 || count % 500 === 0) {
+            console.log('[MediaCrypto:' + direction + '] frame #' + count +
+              ' size=' + frame.data.byteLength + ' hasKey=' + !!aesKey);
+          }
+          return transformFn(frame, controller);
+        });
       }
-      await writer.close();
-    } catch (err) {
-      console.error('[MediaCrypto] Pipeline error, direction:', direction, err);
+      count++;
+      if (count === 1 || count % 500 === 0) {
+        console.log('[MediaCrypto:' + direction + '] frame #' + count +
+          ' size=' + frame.data.byteLength + ' hasKey=' + !!aesKey);
+      }
+      return transformFn(frame, controller);
     }
-  })();
+  });
+  readable.pipeThrough(ts).pipeTo(writable).catch(function(err) {
+    console.error('[MediaCrypto] Pipeline error, direction:', direction, err);
+  });
 }
 
 self.onmessage = function(event) {
   var msg = event.data;
   if (msg.type === 'set-key' && msg.key) {
+    keyReady = new Promise(function(resolve) { resolveKeyReady = resolve; });
     crypto.subtle.importKey(
       'raw', msg.key, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']
     ).then(function(key) {
       aesKey = key;
       console.log('[MediaCrypto] Key imported via postMessage');
+      if (resolveKeyReady) { resolveKeyReady(); resolveKeyReady = null; }
     }).catch(function() {
-      // Key import failed
+      if (resolveKeyReady) { resolveKeyReady(); resolveKeyReady = null; }
     });
   } else if (msg.type === 'start-transform') {
     startPipeline(msg.direction, msg.readable, msg.writable);

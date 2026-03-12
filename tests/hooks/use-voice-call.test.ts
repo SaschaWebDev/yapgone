@@ -5,6 +5,7 @@ import {
   _shouldFailForConnectionState,
   _shouldStartDisconnectedGrace,
   _canEnterRingingOnIncoming,
+  _canToggleE2ee,
 } from '@/hooks/use-voice-call'
 
 describe('voice call ICE strategy', () => {
@@ -57,5 +58,22 @@ describe('incoming call transition guard', () => {
     expect(_canEnterRingingOnIncoming('connecting')).toBe(false)
     expect(_canEnterRingingOnIncoming('active')).toBe(false)
     expect(_canEnterRingingOnIncoming('ringing')).toBe(false)
+  })
+})
+
+describe('E2EE toggle guard', () => {
+  it('allows toggle when active and not reconnecting', () => {
+    expect(_canToggleE2ee('active', false)).toBe(true)
+  })
+
+  it('blocks toggle when reconnecting', () => {
+    expect(_canToggleE2ee('active', true)).toBe(false)
+  })
+
+  it('blocks toggle when not in active call', () => {
+    const nonActiveStates: CallState[] = ['idle', 'requesting', 'ringing', 'connecting', 'ended', 'failed']
+    for (const state of nonActiveStates) {
+      expect(_canToggleE2ee(state, false)).toBe(false)
+    }
   })
 })

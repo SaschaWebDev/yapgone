@@ -29,6 +29,7 @@ export type VoiceSignal =
   | { kind: 'voice-end' }
   | { kind: 'screen-share-start' }
   | { kind: 'screen-share-stop' }
+  | { kind: 'e2ee-toggle'; e2ee: boolean }
 
 export type CallState =
   | 'idle'

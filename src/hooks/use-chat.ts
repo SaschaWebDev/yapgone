@@ -99,6 +99,7 @@ const DecryptedPayloadSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('voice-end') }),
   z.object({ kind: z.literal('screen-share-start') }),
   z.object({ kind: z.literal('screen-share-stop') }),
+  z.object({ kind: z.literal('e2ee-toggle'), e2ee: z.boolean() }),
   z.object({ kind: z.literal('username-set'), username: z.string().min(1).max(24) }),
   z.object({
     kind: z.literal('reaction'),

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import type { CallState } from '@/types'
 import { Button } from '../button'
-import { IconPhone, IconMic, IconMicOff, IconScreenShare, IconScreenShareOff } from '../icons'
+import { IconPhone, IconMic, IconMicOff, IconScreenShare, IconScreenShareOff, IconSpeaker, IconSpeakerOff, IconLock, IconLockOpen } from '../icons'
 import styles from './VoiceControls.module.css'
 
 type PrivacyAction = 'start' | 'accept'
@@ -16,11 +16,16 @@ interface VoiceControlsProps {
   callDuration: number
   privacyAcknowledged: boolean
   isScreenSharing: boolean
+  isDeafened: boolean
+  isE2eeEnabled: boolean
+  isReconnecting: boolean
   onStartCall: () => void
   onAcceptCall: () => void
   onDeclineCall: () => void
   onEndCall: () => void
   onToggleMute: () => void
+  onToggleDeafen: () => void
+  onToggleE2ee: () => void
   onAcknowledgePrivacy: () => void
   onResetCallState: () => void
   onStartScreenShare: () => void
@@ -39,11 +44,16 @@ export function VoiceControls({
   callDuration,
   privacyAcknowledged,
   isScreenSharing,
+  isDeafened,
+  isE2eeEnabled,
+  isReconnecting,
   onStartCall,
   onAcceptCall,
   onDeclineCall,
   onEndCall,
   onToggleMute,
+  onToggleDeafen,
+  onToggleE2ee,
   onAcknowledgePrivacy,
   onResetCallState,
   onStartScreenShare,
@@ -53,6 +63,10 @@ export function VoiceControls({
   const [pendingPrivacyAction, setPendingPrivacyAction] = useState<PrivacyAction | null>(null)
   const [ringtoneBlocked, setRingtoneBlocked] = useState(false)
   const ringtoneRef = useRef<HTMLAudioElement | null>(null)
+  const [dialtoneBlocked, setDialtoneBlocked] = useState(false)
+  const dialtoneRef = useRef<HTMLAudioElement | null>(null)
+  const declineSfxRef = useRef<HTMLAudioElement | null>(null)
+  const prevCallStateRef = useRef<CallState>(callState)
 
   useEffect(() => {
     const ringtone = new Audio('/yapgone-ringtone.mp3')
@@ -68,6 +82,40 @@ export function VoiceControls({
       ringtoneRef.current = null
     }
   }, [])
+
+  useEffect(() => {
+    const dialtone = new Audio('/yapgone-dialtone.mp3')
+    dialtone.loop = true
+    dialtone.preload = 'auto'
+    dialtoneRef.current = dialtone
+
+    return () => {
+      if (dialtoneRef.current) {
+        dialtoneRef.current.pause()
+        dialtoneRef.current.currentTime = 0
+      }
+      dialtoneRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    const sfx = new Audio('/yapgone-call-declined.mp3')
+    sfx.preload = 'auto'
+    declineSfxRef.current = sfx
+
+    return () => {
+      declineSfxRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    const prev = prevCallStateRef.current
+    prevCallStateRef.current = callState
+
+    if (prev === 'requesting' && callState === 'ended') {
+      void declineSfxRef.current?.play().catch(() => { /* autoplay blocked */ })
+    }
+  }, [callState])
 
   useEffect(() => {
     const ringtone = ringtoneRef.current
@@ -91,6 +139,23 @@ export function VoiceControls({
     setRingtoneBlocked(false)
   }, [callState])
 
+  useEffect(() => {
+    const dialtone = dialtoneRef.current
+    if (!dialtone) return
+
+    if (callState === 'requesting') {
+      dialtone.currentTime = 0
+      void dialtone.play()
+        .then(() => { setDialtoneBlocked(false) })
+        .catch(() => { setDialtoneBlocked(true) })
+      return
+    }
+
+    dialtone.pause()
+    dialtone.currentTime = 0
+    setDialtoneBlocked(false)
+  }, [callState])
+
   const handleEnableRingtone = () => {
     const ringtone = ringtoneRef.current
     if (!ringtone) return
@@ -102,6 +167,15 @@ export function VoiceControls({
       .catch(() => {
         setRingtoneBlocked(true)
       })
+  }
+
+  const handleEnableDialtone = () => {
+    const dialtone = dialtoneRef.current
+    if (!dialtone) return
+    dialtone.currentTime = 0
+    void dialtone.play()
+      .then(() => { setDialtoneBlocked(false) })
+      .catch(() => { setDialtoneBlocked(true) })
   }
 
   // Auto-reset ended/failed state after a brief display
@@ -201,6 +275,16 @@ export function VoiceControls({
       <div className={styles.wrapper}>
         <div className={styles.banner}>
           <span className={styles.bannerText}>Calling...</span>
+          {dialtoneBlocked && (
+            <button
+              className={styles.enableDialtoneButton}
+              onClick={handleEnableDialtone}
+              title="Enable dialtone"
+              aria-label="Enable dialtone"
+            >
+              Enable dialtone
+            </button>
+          )}
           <Button intent='neutral' size='sm' onClick={onEndCall}>
             Cancel
           </Button>
@@ -265,6 +349,7 @@ export function VoiceControls({
       <div className={styles.wrapper}>
         <div className={styles.activeDot} />
         <span className={styles.duration}>{formatDuration(callDuration)}</span>
+        {isReconnecting && <span className={styles.reconnectingText}>Switching...</span>}
         <div className={styles.banner} />
         <button
           className={isMuted ? styles.mutedButton : styles.muteButton}
@@ -273,6 +358,14 @@ export function VoiceControls({
           aria-label={isMuted ? 'Unmute microphone' : 'Mute microphone'}
         >
           {isMuted ? <IconMicOff size={21} /> : <IconMic size={21} />}
+        </button>
+        <button
+          className={isDeafened ? styles.deafenedButton : styles.deafenButton}
+          onClick={onToggleDeafen}
+          title={isDeafened ? 'Undeafen' : 'Deafen'}
+          aria-label={isDeafened ? 'Undeafen audio' : 'Deafen audio'}
+        >
+          {isDeafened ? <IconSpeakerOff size={21} /> : <IconSpeaker size={21} />}
         </button>
         {typeof navigator !== 'undefined' &&
           navigator.mediaDevices &&
@@ -286,6 +379,15 @@ export function VoiceControls({
             {isScreenSharing ? <IconScreenShareOff size={21} /> : <IconScreenShare size={21} />}
           </button>
         )}
+        <button
+          className={isE2eeEnabled ? styles.e2eeOnButton : styles.e2eeOffButton}
+          onClick={onToggleE2ee}
+          disabled={isReconnecting}
+          title={isE2eeEnabled ? 'Disable encryption' : 'Enable encryption'}
+          aria-label={isE2eeEnabled ? 'Disable voice encryption' : 'Enable voice encryption'}
+        >
+          {isE2eeEnabled ? <IconLock size={21} /> : <IconLockOpen size={21} />}
+        </button>
         <button
           className={styles.endCallButton}
           onClick={onEndCall}
