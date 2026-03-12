@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { IconMic } from '../icons'
+import { IconMic, IconPause, IconPlay, IconTrash } from '../icons'
 import styles from './ChatInput.module.css'
 
 interface ChatInputProps {
@@ -16,6 +16,11 @@ interface ChatInputProps {
   onCancelRecording?: () => void
   voiceNoteError?: string | null
   voiceNoteSizeWarningSeconds?: number | null
+  isRecordingPaused?: boolean
+  onTogglePauseRecording?: () => void
+  previewAudioUrl?: string | null
+  previewDurationMs?: number
+  previewWaveform?: number[]
 }
 
 const TYPING_TIMEOUT = 5_000
@@ -23,6 +28,13 @@ const TYPING_TIMEOUT = 5_000
 function formatRecordingTime(seconds: number): string {
   const m = Math.floor(seconds / 60)
   const s = seconds % 60
+  return `${m}:${s.toString().padStart(2, '0')}`
+}
+
+function formatMs(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000)
+  const m = Math.floor(totalSeconds / 60)
+  const s = totalSeconds % 60
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
@@ -40,12 +52,24 @@ export function ChatInput({
   onCancelRecording,
   voiceNoteError,
   voiceNoteSizeWarningSeconds,
+  isRecordingPaused = false,
+  onTogglePauseRecording,
+  previewAudioUrl,
+  previewDurationMs = 0,
+  previewWaveform,
 }: ChatInputProps) {
   const [text, setText] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const isTypingRef = useRef(false)
   const textRef = useRef('')
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Preview playback state
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [playbackMs, setPlaybackMs] = useState(0)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const animFrameRef = useRef<number | null>(null)
+
   const canAutoFocus = !disabled && !isRecording
 
   useEffect(() => {
@@ -67,6 +91,34 @@ export function ChatInput({
       }
     }
   }, [])
+
+  // Cleanup audio on unmount or when preview URL changes
+  useEffect(() => {
+    return () => {
+      if (animFrameRef.current) {
+        cancelAnimationFrame(animFrameRef.current)
+      }
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current = null
+      }
+    }
+  }, [previewAudioUrl])
+
+  // Reset playback state when leaving paused state (resume or send)
+  useEffect(() => {
+    if (!isRecordingPaused) {
+      setIsPlaying(false)
+      setPlaybackMs(0)
+      if (animFrameRef.current) {
+        cancelAnimationFrame(animFrameRef.current)
+      }
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current = null
+      }
+    }
+  }, [isRecordingPaused])
 
   const wrapSelection = useCallback((marker: string) => {
     const textarea = textareaRef.current
@@ -194,6 +246,53 @@ export function ChatInput({
     }
   }, [maxLength, onTyping])
 
+  const updatePlaybackPosition = useCallback(() => {
+    const audio = audioRef.current
+    if (!audio) return
+    setPlaybackMs(audio.currentTime * 1000)
+    if (!audio.paused) {
+      animFrameRef.current = requestAnimationFrame(updatePlaybackPosition)
+    }
+  }, [])
+
+  const togglePreviewPlayback = useCallback(() => {
+    if (!previewAudioUrl) return
+
+    if (!audioRef.current) {
+      const audio = new Audio(previewAudioUrl)
+      audioRef.current = audio
+      audio.addEventListener('ended', () => {
+        setIsPlaying(false)
+        setPlaybackMs(0)
+        if (animFrameRef.current) {
+          cancelAnimationFrame(animFrameRef.current)
+        }
+      })
+    }
+
+    const audio = audioRef.current
+    if (isPlaying) {
+      audio.pause()
+      if (animFrameRef.current) {
+        cancelAnimationFrame(animFrameRef.current)
+      }
+      setIsPlaying(false)
+    } else {
+      void audio.play()
+      setIsPlaying(true)
+      animFrameRef.current = requestAnimationFrame(updatePlaybackPosition)
+    }
+  }, [previewAudioUrl, isPlaying, updatePlaybackPosition])
+
+  const handleWaveformClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const audio = audioRef.current
+    if (!audio || !previewDurationMs) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const fraction = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+    audio.currentTime = (fraction * previewDurationMs) / 1000
+    setPlaybackMs(fraction * previewDurationMs)
+  }, [previewDurationMs])
+
   const showMic = !text.trim() && !disabled && !isRecording && !isSendingVoiceNote && !!onStartRecording
 
   const sendIcon = (
@@ -203,10 +302,88 @@ export function ChatInput({
     </svg>
   )
 
+  // Recording mode — paused sub-state (with waveform/playback)
+  if (isRecording && isRecordingPaused) {
+    const waveform = previewWaveform ?? []
+    const progress = previewDurationMs > 0 ? playbackMs / previewDurationMs : 0
+
+    return (
+      <div className={styles.wrapper}>
+        <div className={styles.container}>
+          <button
+            className={styles.cancelButton}
+            onClick={onCancelRecording}
+            aria-label="Discard recording"
+          >
+            <IconTrash size={22} />
+          </button>
+          <button
+            className={styles.playButton}
+            onClick={togglePreviewPlayback}
+            aria-label={isPlaying ? 'Pause playback' : 'Play recording'}
+          >
+            {isPlaying ? <IconPause size={22} /> : <IconPlay size={22} />}
+          </button>
+          <div className={styles.previewBar}>
+            <div
+              className={styles.waveformContainer}
+              onClick={handleWaveformClick}
+              role="slider"
+              aria-label="Audio preview progress"
+              aria-valuemin={0}
+              aria-valuemax={previewDurationMs}
+              aria-valuenow={Math.round(playbackMs)}
+              tabIndex={0}
+            >
+              {waveform.map((peak, i) => {
+                const fraction = waveform.length > 0 ? i / waveform.length : 0
+                const played = fraction < progress
+                const height = Math.max(3, peak * 28)
+                return (
+                  <div
+                    key={i}
+                    className={`${styles.waveformBar} ${played ? styles.waveformBarPlayed : styles.waveformBarUnplayed}`}
+                    style={{ height: `${height}px` }}
+                  />
+                )
+              })}
+            </div>
+            <span className={styles.previewTime}>
+              {formatMs(playbackMs)} / {formatMs(previewDurationMs)}
+            </span>
+          </div>
+          <button
+            className={styles.pauseButton}
+            onClick={onTogglePauseRecording}
+            aria-label="Resume recording"
+          >
+            <IconMic size={22} />
+          </button>
+          <button
+            className={styles.sendButton}
+            onClick={onStopRecording}
+            aria-label="Send voice note"
+          >
+            {sendIcon}
+          </button>
+        </div>
+        {voiceNoteError && <span className={styles.voiceNoteError}>{voiceNoteError}</span>}
+      </div>
+    )
+  }
+
+  // Recording mode — actively recording
   if (isRecording) {
     return (
       <div className={styles.wrapper}>
         <div className={styles.container}>
+          <button
+            className={styles.cancelButton}
+            onClick={onCancelRecording}
+            aria-label="Cancel recording"
+          >
+            <IconTrash size={22} />
+          </button>
           <div className={styles.recordingBar}>
             <span className={styles.recordingDot} />
             <span className={styles.recordingTimer}>{formatRecordingTime(recordingDuration)}</span>
@@ -217,21 +394,18 @@ export function ChatInput({
             )}
           </div>
           <button
+            className={styles.pauseButton}
+            onClick={onTogglePauseRecording}
+            aria-label="Pause recording"
+          >
+            <IconPause size={22} />
+          </button>
+          <button
             className={styles.sendButton}
             onClick={onStopRecording}
             aria-label="Send voice note"
           >
             {sendIcon}
-          </button>
-          <button
-            className={styles.cancelButton}
-            onClick={onCancelRecording}
-            aria-label="Cancel recording"
-          >
-            <svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
           </button>
         </div>
         {voiceNoteError && <span className={styles.voiceNoteError}>{voiceNoteError}</span>}
@@ -239,6 +413,7 @@ export function ChatInput({
     )
   }
 
+  // Normal text input mode
   return (
     <div className={styles.wrapper}>
       <div className={styles.container}>

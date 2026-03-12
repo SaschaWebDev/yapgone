@@ -157,3 +157,97 @@
   text-align: right;
   padding-right: 0.1rem;
 }
+
+.recordingDotPaused {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--error);
+  flex-shrink: 0;
+  animation: none;
+  opacity: 0.5;
+}
+
+.pauseButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.pauseButton:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.previewBar {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0 0.85rem;
+  min-height: 2.75rem;
+}
+
+.waveformContainer {
+  flex: 1;
+  height: 2rem;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  cursor: pointer;
+}
+
+.waveformBar {
+  width: 3px;
+  border-radius: 1px;
+  transition: height 0.1s ease;
+  min-height: 3px;
+}
+
+.waveformBarPlayed {
+  background: var(--accent);
+}
+
+.waveformBarUnplayed {
+  background: var(--text-tertiary);
+  opacity: 0.3;
+}
+
+.previewTime {
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.playButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.playButton:hover {
+  opacity: 0.85;
+}
