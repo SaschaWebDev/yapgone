@@ -30,7 +30,8 @@ export function Home() {
 
   return (
     <div className={styles.wrapper}>
-      <h1 className={styles.heading}>Encrypted chat that fades away</h1>
+      <img src="/yapgone-logo.png" alt="" className={styles.heroLogo} />
+      <h1 className={styles.heading}>Encrypted yapping, gone for good</h1>
       <p className={styles.description}>
         End-to-end encrypted. No accounts. No history.
         When the conversation ends, everything disappears.

@@ -18,16 +18,29 @@
 
 .headerLeft {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 0.6rem;
 }
 
 .logo {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
   font-size: 1.25rem;
   font-weight: 600;
   color: var(--text-primary);
   text-decoration: none;
   letter-spacing: -0.02em;
+}
+
+.logoIcon {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 4px;
+  object-fit: contain;
+  flex-shrink: 0;
+  position: relative;
+  top: 5px;
 }
 
 .logo:hover {
@@ -39,6 +52,8 @@
   color: var(--text-tertiary);
   font-size: 0.65rem;
   font-style: italic;
+  align-self: flex-end;
+  margin-bottom: 8px;
 }
 
 .themeToggle {

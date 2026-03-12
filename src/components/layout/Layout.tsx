@@ -15,6 +15,11 @@ export function Layout({ children }: LayoutProps) {
       <header className={styles.header}>
         <div className={styles.headerLeft}>
           <a href='/' className={styles.logo}>
+            <img
+              src='/yapgone-logo.png'
+              alt=''
+              className={styles.logoIcon}
+            />
             yapgone
           </a>
           <span className={styles.tagline}>
