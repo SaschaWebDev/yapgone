@@ -53,3 +53,34 @@ button {
   font-family: inherit;
   cursor: pointer;
 }
+
+/* ── Custom scrollbar ─────────────────────────────────── */
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(var(--fg), 0.15) transparent;
+}
+
+/* Chrome / Safari / Edge */
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(var(--fg), 0.12);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(var(--fg), 0.25);
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}

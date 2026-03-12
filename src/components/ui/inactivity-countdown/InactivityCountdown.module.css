@@ -1,21 +1,42 @@
-.countdown {
-  font-size: 0.78rem;
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  animation: fadeIn 0.4s ease-out;
+}
+
+.timer {
+  font-size: 5rem;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
-  color: var(--text-tertiary);
-  transition: color 0.3s ease;
-  user-select: none;
+  color: #fff;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+  line-height: 1;
 }
 
-.warning {
-  color: var(--warning);
+.timerPulse {
+  animation: pulse 1s ease-in-out infinite;
 }
 
-.urgent {
-  color: var(--error);
-  animation: urgentPulse 2s ease-in-out infinite;
+.label {
+  margin-top: 0.75rem;
+  font-size: 0.95rem;
+  color: rgba(255, 255, 255, 0.7);
+  letter-spacing: 0.04em;
 }
 
-@keyframes urgentPulse {
-  0%, 100% { opacity: 0.6; }
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.5; }
   50% { opacity: 1; }
 }
