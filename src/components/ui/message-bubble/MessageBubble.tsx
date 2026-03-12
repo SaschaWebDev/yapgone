@@ -1,8 +1,10 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { formatMessage } from '@/utils/format-message'
-import { EmojiQuickPick } from '../emoji-picker'
+import { EmojiQuickPick, EmojiFullPicker } from '../emoji-picker'
 import type { MessageReaction } from '@/hooks/use-chat'
 import styles from './MessageBubble.module.css'
+
+type PickerMode = 'closed' | 'compact' | 'expanded'
 
 interface MessageBubbleProps {
   kind?: 'text' | 'audio'
@@ -22,6 +24,7 @@ interface MessageBubbleProps {
   onCopy?: () => void
   onDownload?: () => void
   skipAnimation?: boolean
+  recentEmojis?: readonly string[]
 }
 
 function formatSeconds(seconds: number): string {
@@ -214,13 +217,15 @@ export function MessageBubble({
   onCopy,
   onDownload,
   skipAnimation,
+  recentEmojis = [],
 }: MessageBubbleProps) {
-  const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerMode, setPickerMode] = useState<PickerMode>('closed')
   const [copyDone, setCopyDone] = useState(false)
   const [compact, setCompact] = useState(false)
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const longPressRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const bubbleRef = useRef<HTMLDivElement>(null)
+  const emojiTriggerRef = useRef<HTMLButtonElement>(null)
 
   const handleCopy = useCallback(() => {
     if (!onCopy || copyDone) return
@@ -231,14 +236,14 @@ export function MessageBubble({
 
   const handleDoubleClick = useCallback(() => {
     if (onReact && sender !== 'system') {
-      setPickerOpen(prev => !prev)
+      setPickerMode(prev => prev === 'closed' ? 'compact' : 'closed')
     }
   }, [onReact, sender])
 
   const handleTouchStart = useCallback(() => {
     if (!onReact || sender === 'system') return
     longPressRef.current = setTimeout(() => {
-      setPickerOpen(true)
+      setPickerMode('compact')
     }, 500)
   }, [onReact, sender])
 
@@ -267,9 +272,13 @@ export function MessageBubble({
   }, [])
 
   const handleEmojiSelect = useCallback((emoji: string) => {
-    setPickerOpen(false)
+    setPickerMode('closed')
     onReact?.(emoji)
   }, [onReact])
+
+  const handleExpand = useCallback(() => {
+    setPickerMode('expanded')
+  }, [])
 
   const handleReactionBadgeClick = useCallback((emoji: string, hasSelf: boolean) => {
     onReact?.(emoji)
@@ -293,9 +302,12 @@ export function MessageBubble({
 
   const isSelf = sender === 'self'
   const grouped = groupReactions(reactions)
+  const hasReactions = grouped.length > 0
+
+  const anchorRect = emojiTriggerRef.current?.getBoundingClientRect()
 
   return (
-    <div className={`${styles.bubbleWrapper} ${isSelf ? styles.bubbleWrapperSelf : styles.bubbleWrapperPeer}${kind === 'audio' ? ` ${styles.bubbleWrapperAudio}` : ''}`} data-msg-id={msgId} role="listitem">
+    <div className={`${styles.bubbleWrapper} ${isSelf ? styles.bubbleWrapperSelf : styles.bubbleWrapperPeer}${kind === 'audio' ? ` ${styles.bubbleWrapperAudio}` : ''}${hasReactions ? ` ${styles.bubbleWrapperHasReactions}` : ''}`} data-msg-id={msgId} role="listitem">
       <div
         ref={bubbleRef}
         className={`${styles.bubble} ${isSelf ? styles.self : styles.peer}${compact && kind !== 'audio' ? ` ${styles.compactActions}` : ''}${kind === 'audio' ? ` ${styles.audioActions}` : ''}${skipAnimation ? ` ${styles.noAnimation}` : ''}`}
@@ -371,9 +383,10 @@ export function MessageBubble({
         )}
         {onReact && (
           <button
+            ref={emojiTriggerRef}
             type="button"
             className={styles.emojiTrigger}
-            onClick={() => setPickerOpen(prev => !prev)}
+            onClick={() => setPickerMode(prev => prev === 'closed' ? 'compact' : 'closed')}
             aria-label="React"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -384,29 +397,40 @@ export function MessageBubble({
             </svg>
           </button>
         )}
+        {hasReactions && (
+          <div className={`${styles.reactionBar} ${isSelf ? styles.reactionBarSelf : styles.reactionBarPeer}`}>
+            {grouped.map(r => (
+              <button
+                key={r.emoji}
+                type="button"
+                className={`${styles.reactionBadge} ${r.hasSelf ? styles.reactionBadgeSelf : ''}`}
+                onClick={() => handleReactionBadgeClick(r.emoji, r.hasSelf)}
+              >
+                <span className={styles.reactionEmoji}>{r.emoji}</span>
+                {r.count > 1 && <span className={styles.reactionCount}>{r.count}</span>}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
-      {grouped.length > 0 && (
-        <div className={`${styles.reactionBar} ${isSelf ? styles.reactionBarSelf : ''}`}>
-          {grouped.map(r => (
-            <button
-              key={r.emoji}
-              type="button"
-              className={`${styles.reactionBadge} ${r.hasSelf ? styles.reactionBadgeSelf : ''}`}
-              onClick={() => handleReactionBadgeClick(r.emoji, r.hasSelf)}
-            >
-              <span className={styles.reactionEmoji}>{r.emoji}</span>
-              {r.count > 1 && <span className={styles.reactionCount}>{r.count}</span>}
-            </button>
-          ))}
-        </div>
+      {pickerMode === 'compact' && anchorRect && (
+        <EmojiQuickPick
+          onSelect={handleEmojiSelect}
+          onClose={() => setPickerMode('closed')}
+          onExpand={handleExpand}
+          recentEmojis={recentEmojis}
+          anchorRect={anchorRect}
+          alignRight={isSelf}
+        />
       )}
-      {pickerOpen && (
-        <div className={`${styles.pickerAnchor} ${isSelf ? styles.pickerAnchorSelf : ''}`}>
-          <EmojiQuickPick
-            onSelect={handleEmojiSelect}
-            onClose={() => setPickerOpen(false)}
-          />
-        </div>
+      {pickerMode === 'expanded' && anchorRect && (
+        <EmojiFullPicker
+          onSelect={handleEmojiSelect}
+          onClose={() => setPickerMode('closed')}
+          recentEmojis={recentEmojis}
+          anchorRect={anchorRect}
+          alignRight={isSelf}
+        />
       )}
     </div>
   )

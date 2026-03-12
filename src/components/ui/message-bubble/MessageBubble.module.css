@@ -19,6 +19,10 @@
   max-width: 15.625rem;
 }
 
+.bubbleWrapperHasReactions {
+  margin-bottom: 0.7rem;
+}
+
 .bubble {
   position: relative;
   padding: 0.6rem 0.85rem;
@@ -125,8 +129,10 @@
   border-color: var(--accent);
 }
 
-.replyButton svg, .emojiTrigger svg,
-.copyButton svg, .downloadActionButton svg {
+.replyButton svg,
+.emojiTrigger svg,
+.copyButton svg,
+.downloadActionButton svg {
   width: 18px;
   height: 18px;
 }
@@ -167,17 +173,22 @@
   border-color: var(--accent);
 }
 
-/* Reaction bar */
+/* Reaction bar — WhatsApp-style overlap at bubble bottom corner */
 .reactionBar {
+  position: absolute;
+  bottom: -0.6rem;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.25rem;
-  margin-top: 0.2rem;
-  align-self: flex-start;
+  gap: 0.2rem;
+  z-index: 1;
 }
 
 .reactionBarSelf {
-  align-self: flex-end;
+  right: 0.5rem;
+}
+
+.reactionBarPeer {
+  left: 0.5rem;
 }
 
 .reactionBadge {
@@ -189,18 +200,22 @@
   border: 1px solid var(--border);
   border-radius: 999px;
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
   font-size: 0.8rem;
   line-height: 1;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
 }
 
 .reactionBadge:hover {
   border-color: var(--accent);
+  background: rgba(var(--fg), 0.08);
 }
 
 .reactionBadgeSelf {
-  background: rgba(var(--accent-rgb), 0.08);
-  border-color: rgba(var(--accent-rgb), 0.25);
+  background: transparent;
+  border-color: transparent;
 }
 
 .reactionEmoji {
@@ -211,20 +226,6 @@
   font-size: 0.7rem;
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
-}
-
-/* Emoji picker anchor */
-.pickerAnchor {
-  position: absolute;
-  bottom: 100%;
-  left: 0;
-  margin-bottom: 0.3rem;
-  z-index: 10;
-}
-
-.pickerAnchorSelf {
-  left: auto;
-  right: 0;
 }
 
 /* Custom audio player */
@@ -399,8 +400,12 @@
 }
 
 /* Text formatting */
-.text :global(.msgBold) { font-weight: 600; }
-.text :global(.msgItalic) { font-style: italic; }
+.text :global(.msgBold) {
+  font-weight: 600;
+}
+.text :global(.msgItalic) {
+  font-style: italic;
+}
 
 /* Copy / Download action button — visible on hover */
 .copyButton,
@@ -465,10 +470,18 @@
   height: 15px;
 }
 
-.compactActions .replyButton { top: 1px; }
-.compactActions .emojiTrigger { top: 32px; }
-.compactActions .copyButton { top: 63px; }
-.compactActions .downloadActionButton { top: 63px; }
+.compactActions .replyButton {
+  top: 1px;
+}
+.compactActions .emojiTrigger {
+  top: 32px;
+}
+.compactActions .copyButton {
+  top: 63px;
+}
+.compactActions .downloadActionButton {
+  top: 63px;
+}
 
 .compactActions.self .replyButton,
 .compactActions.self .emojiTrigger,
@@ -524,9 +537,15 @@
   height: 18px;
 }
 
-.audioActions .replyButton { top: 0px; }
-.audioActions .emojiTrigger { top: 37px; }
-.audioActions .downloadActionButton { top: 74px; }
+.audioActions .replyButton {
+  top: 0px;
+}
+.audioActions .emojiTrigger {
+  top: 37px;
+}
+.audioActions .downloadActionButton {
+  top: 74px;
+}
 
 .audioActions.self .replyButton,
 .audioActions.self .emojiTrigger,
@@ -544,19 +563,37 @@
   animation: highlightFlash 1.5s ease-out;
 }
 
-.noAnimation { animation: none !important; }
+.noAnimation {
+  animation: none !important;
+}
 
 @keyframes slideInRight {
-  from { opacity: 0; transform: translateX(12px) translateY(4px); }
-  to   { opacity: 1; transform: translateX(0) translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateX(12px) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) translateY(0);
+  }
 }
 
 @keyframes highlightFlash {
-  0%   { background: rgba(var(--accent-rgb), 0.25); }
-  100% { background: transparent; }
+  0% {
+    background: rgba(var(--accent-rgb), 0.25);
+  }
+  100% {
+    background: transparent;
+  }
 }
 
 @keyframes slideInLeft {
-  from { opacity: 0; transform: translateX(-12px) translateY(4px); }
-  to   { opacity: 1; transform: translateX(0) translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateX(-12px) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) translateY(0);
+  }
 }
