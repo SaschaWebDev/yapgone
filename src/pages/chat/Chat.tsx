@@ -1,7 +1,9 @@
 import { useRef, useEffect, useState, useCallback, type FormEvent } from 'react';
-import { useChatAsCreator, useChatAsJoiner, useVoiceCall } from '@/hooks';
+import chatBubbleStyles from '@/components/ui/message-bubble/MessageBubble.module.css';
+import { useChatAsCreator, useChatAsJoiner, useVoiceCall, useNotifications, useLocalChatSettings, useInactivityTimer } from '@/hooks';
 import type { VoiceSignal } from '@/types';
 import type { ChatMessage } from '@/hooks/use-chat';
+import type { ConnectionQuality } from '@/components/ui/status-badge/StatusBadge';
 import type { RoomSettings } from '@/room-settings';
 import {
   DEFAULT_ROOM_SETTINGS,
@@ -10,14 +12,19 @@ import {
   verifySafeWord,
 } from '@/room-settings';
 import {
+  Button,
   MessageBubble,
   ChatInput,
   StatusBadge,
   VoiceControls,
+  ScreenShareView,
   IconCopy,
   IconCheck,
   IconGear,
   OnOffToggle,
+  QrCode,
+  ReplyPreview,
+  InactivityCountdown,
 } from '@/components';
 import {
   MAX_MESSAGE_LENGTH,
@@ -27,10 +34,15 @@ import {
   VOICE_NOTE_MAX_BYTES,
   VOICE_NOTE_MAX_DURATION_MS,
   VOICE_NOTE_SIZE_WARNING_THRESHOLD_S,
+  VOICE_NOTE_DURATION_WARNING_THRESHOLD_S,
   VOICE_NOTE_SIZE_SAFETY_RATIO,
   VOICE_NOTE_TIMESLICE_MS,
+  VOICE_NOTE_AUDIO_BITRATE,
   SAFE_WORD_MAX_ATTEMPTS,
   USERNAME_MAX_LENGTH,
+  ROOM_INACTIVITY_TTL_MS,
+  INACTIVITY_WARNING_THRESHOLD_S,
+  INACTIVITY_URGENT_THRESHOLD_S,
 } from '@/constants';
 import styles from './Chat.module.css';
 
@@ -154,6 +166,7 @@ function CreatorChat({ initialRoomSettings }: { initialRoomSettings: RoomSetting
     peerTyping,
     inviteUrl,
     sendMessage,
+    sendReaction,
     sendTyping,
     sendVoiceSignal,
     sendVoiceNote,
@@ -165,6 +178,7 @@ function CreatorChat({ initialRoomSettings }: { initialRoomSettings: RoomSetting
     localUsername,
     peerUsername,
     setLocalUsername,
+    mediaKeyRaw,
     error,
   } = useChatAsCreator(voiceHandlerRef, initialRoomSettings);
 
@@ -172,6 +186,7 @@ function CreatorChat({ initialRoomSettings }: { initialRoomSettings: RoomSetting
     sendSignal: sendVoiceSignal,
     onSignalRef: voiceHandlerRef,
     peerConnected: phase === 'ready',
+    mediaKeyRaw,
   });
 
   return (
@@ -182,6 +197,7 @@ function CreatorChat({ initialRoomSettings }: { initialRoomSettings: RoomSetting
       inviteUrl={inviteUrl}
       error={error}
       onSend={sendMessage}
+      onReact={sendReaction}
       onTyping={sendTyping}
       onSendVoiceNote={sendVoiceNote}
       onEnd={endChat}
@@ -212,6 +228,7 @@ function JoinerChat({
     messages,
     peerTyping,
     sendMessage,
+    sendReaction,
     sendTyping,
     sendVoiceSignal,
     sendVoiceNote,
@@ -222,6 +239,7 @@ function JoinerChat({
     localUsername,
     peerUsername,
     setLocalUsername,
+    mediaKeyRaw,
     error,
   } = useChatAsJoiner(roomId, creatorPubKey, initialRoomSettings, voiceHandlerRef);
 
@@ -229,6 +247,7 @@ function JoinerChat({
     sendSignal: sendVoiceSignal,
     onSignalRef: voiceHandlerRef,
     peerConnected: phase === 'ready',
+    mediaKeyRaw,
   });
 
   return (
@@ -239,6 +258,7 @@ function JoinerChat({
       inviteUrl={null}
       error={error}
       onSend={sendMessage}
+      onReact={sendReaction}
       onTyping={sendTyping}
       onSendVoiceNote={sendVoiceNote}
       onEnd={endChat}
@@ -254,11 +274,25 @@ function JoinerChat({
   );
 }
 
+function deriveConnectionQuality(phase: string, msgs: ChatMessage[]): ConnectionQuality {
+  if (phase === 'peer-disconnected') return 'degraded'
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const msg = msgs[i]
+    if (msg?.sender !== 'system') continue
+    if (msg.text === 'Connection lost, reconnecting...') return 'reconnecting'
+    if (msg.text === 'Failed to reconnect') return 'lost'
+    break
+  }
+  return 'good'
+}
+
 interface VoiceState {
   callState: import('@/types').CallState;
   isMuted: boolean;
   callDuration: number;
   privacyAcknowledged: boolean;
+  isScreenSharing: boolean;
+  remoteScreenStream: MediaStream | null;
   startCall: () => void;
   acceptCall: () => Promise<void>;
   declineCall: () => void;
@@ -266,6 +300,8 @@ interface VoiceState {
   toggleMute: () => void;
   acknowledgePrivacy: () => void;
   resetCallState: () => void;
+  startScreenShare: () => Promise<void>;
+  stopScreenShare: () => void;
 }
 
 interface ChatViewProps {
@@ -274,7 +310,8 @@ interface ChatViewProps {
   peerTyping: boolean;
   inviteUrl: string | null;
   error: string | null;
-  onSend: (text: string) => void;
+  onSend: (text: string, replyTo?: string) => void;
+  onReact: (msgId: string, emoji: string, action: 'add' | 'remove') => void;
   onTyping: (active: boolean) => void;
   onSendVoiceNote: (blob: Blob, durationMs: number, mimeType: string) => Promise<void>;
   onEnd: () => void;
@@ -295,6 +332,7 @@ function ChatView({
   inviteUrl,
   error,
   onSend,
+  onReact,
   onTyping,
   onSendVoiceNote,
   onEnd,
@@ -308,7 +346,7 @@ function ChatView({
   voice,
 }: ChatViewProps) {
   const [showEndConfirm, setShowEndConfirm] = useState(false);
-  const [showEndForMeConfirm, setShowEndForMeConfirm] = useState(false);
+  const [showEndForMeOptions, setShowEndForMeOptions] = useState(false);
   const [copyState, setCopyState] = useState<'idle' | 'shown' | 'fading'>(
     'idle',
   );
@@ -317,6 +355,7 @@ function ChatView({
   const [isSendingVoiceNote, setIsSendingVoiceNote] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [voiceNoteSizeWarningSeconds, setVoiceNoteSizeWarningSeconds] = useState<number | null>(null);
+  const [voiceNoteTimeWarningSeconds, setVoiceNoteTimeWarningSeconds] = useState<number | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pendingSafeWordEnabled, setPendingSafeWordEnabled] = useState(Boolean(roomSettings.safeWord));
   const [pendingSafeWord, setPendingSafeWord] = useState('');
@@ -328,6 +367,11 @@ function ChatView({
   const [pendingUsername, setPendingUsername] = useState('');
   const [usernameBusy, setUsernameBusy] = useState(false);
   const [usernameError, setUsernameError] = useState<string | null>(null);
+  const [unreadBelow, setUnreadBelow] = useState(0);
+  const [localSettingsOpen, setLocalSettingsOpen] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
+  const [inputFocusTrigger, setInputFocusTrigger] = useState(0);
+  const isAtBottomRef = useRef(true);
   const safeWordDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -337,7 +381,32 @@ function ChatView({
   const voiceNoteAutoStopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const accumulatedBytesRef = useRef(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messageListRef = useRef<HTMLDivElement>(null);
+  const prevMessageCountRef = useRef(messages.length);
+  const localSettingsRef = useRef<HTMLDivElement>(null);
   const copied = copyState !== 'idle';
+
+  const { settings: localSettings, updateSetting } = useLocalChatSettings();
+
+  const { remainingSeconds, resetTimer } = useInactivityTimer(ROOM_INACTIVITY_TTL_MS);
+
+  useNotifications(messages, phase, localSettings.soundEnabled);
+
+  // Reset inactivity timer on any new message (sent or received)
+  useEffect(() => {
+    if (messages.length > 0) resetTimer();
+  }, [messages.length, resetTimer]);
+
+  // Reset inactivity timer when peer starts typing
+  useEffect(() => {
+    if (peerTyping) resetTimer();
+  }, [peerTyping, resetTimer]);
+
+  // Wrap onTyping to also reset inactivity timer
+  const handleTyping = useCallback((active: boolean) => {
+    if (active) resetTimer();
+    onTyping(active);
+  }, [onTyping, resetTimer]);
 
   const handleCopy = useCallback(async () => {
     if (!inviteUrl || copyState !== 'idle') return;
@@ -360,16 +429,114 @@ function ChatView({
     window.location.hash = '';
   }, []);
 
+  const handleSend = useCallback((text: string) => {
+    onSend(text, replyingTo?.id);
+    setReplyingTo(null);
+  }, [onSend, replyingTo]);
+
+  const handleCopyMessage = useCallback(async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      const input = document.createElement('input')
+      input.value = text
+      document.body.appendChild(input)
+      input.select()
+      document.execCommand('copy')
+      document.body.removeChild(input)
+    }
+  }, [])
+
+  const scrollToMessage = useCallback((targetMsgId: string) => {
+    const el = document.querySelector(`[data-msg-id="${targetMsgId}"]`);
+    const cls = chatBubbleStyles.highlighted;
+    if (!el || !cls) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add(cls);
+    const onEnd = () => {
+      el.classList.remove(cls);
+      el.removeEventListener('animationend', onEnd);
+    };
+    el.addEventListener('animationend', onEnd);
+  }, []);
+
+  const handleReact = useCallback((msgId: string, emoji: string) => {
+    const msg = messages.find(m => m.id === msgId);
+    if (!msg) return;
+    const alreadyReacted = msg.reactions.some(r => r.emoji === emoji && r.fromSelf);
+    onReact(msgId, emoji, alreadyReacted ? 'remove' : 'add');
+  }, [messages, onReact]);
+
   const newChatButton = (
     <button className={styles.restartLink} onClick={handleNewChat}>
       Start a new conversation
     </button>
   );
 
+  // Auto-scroll logic
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length]);
+    const newCount = messages.length;
+    const added = newCount - prevMessageCountRef.current;
+    prevMessageCountRef.current = newCount;
 
+    if (added <= 0) return;
+
+    if (localSettings.autoScroll) {
+      // Auto-scroll always when enabled
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      setUnreadBelow(0);
+    } else if (isAtBottomRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    } else {
+      const newPeerMessages = messages.slice(-added).filter((m) => m.sender === 'peer');
+      if (newPeerMessages.length > 0) {
+        setUnreadBelow((prev) => prev + newPeerMessages.length);
+      }
+    }
+  }, [messages.length, messages, localSettings.autoScroll]);
+
+  const handleMessageListScroll = useCallback(() => {
+    const el = messageListRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    isAtBottomRef.current = atBottom;
+    if (atBottom) setUnreadBelow(0);
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    setUnreadBelow(0);
+  }, []);
+
+  // Close local settings dropdown on outside click
+  useEffect(() => {
+    if (!localSettingsOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (localSettingsRef.current && !localSettingsRef.current.contains(e.target as Node)) {
+        setLocalSettingsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [localSettingsOpen]);
+
+  // Escape key dismissal
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (localSettingsOpen) {
+        setLocalSettingsOpen(false);
+      } else if (replyingTo) {
+        setReplyingTo(null);
+      } else if (showEndConfirm) {
+        setShowEndConfirm(false);
+      } else if (showEndForMeOptions) {
+        setShowEndForMeOptions(false);
+      }
+    };
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [localSettingsOpen, replyingTo, showEndConfirm, showEndForMeOptions]);
 
   useEffect(() => {
     if (localUsername) {
@@ -420,6 +587,7 @@ function ChatView({
     setIsRecordingNote(false);
     setRecordingDuration(0);
     setVoiceNoteSizeWarningSeconds(null);
+    setVoiceNoteTimeWarningSeconds(null);
   }, []);
 
   const finalizeVoiceNote = useCallback(() => {
@@ -452,9 +620,10 @@ function ChatView({
       const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
         ? 'audio/webm;codecs=opus'
         : '';
-      const recorder = mimeType
-        ? new MediaRecorder(stream, { mimeType })
-        : new MediaRecorder(stream);
+      const recorder = new MediaRecorder(stream, {
+        ...(mimeType ? { mimeType } : {}),
+        audioBitsPerSecond: VOICE_NOTE_AUDIO_BITRATE,
+      });
       mediaRecorderRef.current = recorder;
       voiceNoteChunksRef.current = [];
       voiceNoteStartedAtRef.current = Date.now();
@@ -496,7 +665,16 @@ function ChatView({
       setIsRecordingNote(true);
       setRecordingDuration(0);
       recordingIntervalRef.current = setInterval(() => {
-        setRecordingDuration((prev) => prev + 1);
+        setRecordingDuration((prev) => {
+          const next = prev + 1;
+          const remainingS = (VOICE_NOTE_MAX_DURATION_MS / 1000) - next;
+          if (remainingS <= VOICE_NOTE_DURATION_WARNING_THRESHOLD_S && remainingS > 0) {
+            setVoiceNoteTimeWarningSeconds(remainingS);
+          } else {
+            setVoiceNoteTimeWarningSeconds(null);
+          }
+          return next;
+        });
       }, 1000);
       voiceNoteAutoStopRef.current = setTimeout(() => {
         if (mediaRecorderRef.current?.state === 'recording') {
@@ -641,51 +819,54 @@ function ChatView({
         <div className={styles.centered}>
           <p className={styles.status}>Waiting for partner...</p>
           {inviteUrl && (
-            <div className={styles.inviteSection}>
-              <p className={styles.inviteLabel}>
-                Share this link with your partner:
-              </p>
-              <div
-                className={`${styles.inviteBox} ${copied ? styles.inviteBoxCopied : ''}`}
-                onClick={handleCopy}
-                role='button'
-                tabIndex={0}
-              >
-                <code className={styles.urlText}>{inviteUrl}</code>
-                <div className={styles.inviteActions}>
-                  <button
-                    type='button'
-                    className={styles.copyIcon}
-                    onClick={handleCopy}
-                    title={copied ? 'copied' : 'copy to clipboard'}
-                  >
-                    {copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
-                  </button>
-                  {onUpdateRoomSettings && (
+            <div className={styles.inviteRow}>
+              <div className={styles.inviteSection}>
+                <p className={styles.inviteLabel}>
+                  Share this link with your partner:
+                </p>
+                <div
+                  className={`${styles.inviteBox} ${copied ? styles.inviteBoxCopied : ''}`}
+                  onClick={handleCopy}
+                  role='button'
+                  tabIndex={0}
+                >
+                  <code className={styles.urlText}>{inviteUrl}</code>
+                  <div className={styles.inviteActions}>
                     <button
                       type='button'
-                      className={`${styles.gearButton} ${settingsOpen ? styles.gearButtonActive : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSettingsOpen((prev) => {
-                          if (prev) flushPendingSafeWord();
-                          return !prev;
-                        });
-                      }}
-                      title='Chat room settings'
+                      className={styles.copyIcon}
+                      onClick={handleCopy}
+                      title={copied ? 'copied' : 'copy to clipboard'}
                     >
-                      <IconGear size={14} />
+                      {copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
                     </button>
+                    {onUpdateRoomSettings && (
+                      <button
+                        type='button'
+                        className={`${styles.gearButton} ${settingsOpen ? styles.gearButtonActive : ''}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSettingsOpen((prev) => {
+                            if (prev) flushPendingSafeWord();
+                            return !prev;
+                          });
+                        }}
+                        title='Chat room settings'
+                      >
+                        <IconGear size={21} />
+                      </button>
+                    )}
+                  </div>
+                  {copied && (
+                    <span
+                      className={`${styles.copiedHint} ${copyState === 'fading' ? styles.copiedHintFading : ''}`}
+                    >
+                      copied to clipboard
+                    </span>
                   )}
                 </div>
-                {copied && (
-                  <span
-                    className={`${styles.copiedHint} ${copyState === 'fading' ? styles.copiedHintFading : ''}`}
-                  >
-                    copied to clipboard
-                  </span>
-                )}
               </div>
+              <QrCode url={inviteUrl} size={140} />
             </div>
           )}
           {onUpdateRoomSettings && (
@@ -763,6 +944,8 @@ function ChatView({
           {messages.map((msg) => (
             <MessageBubble
               key={msg.id}
+              skipAnimation
+              msgId={msg.id}
               kind={msg.kind}
               text={msg.text}
               audioUrl={msg.audioUrl}
@@ -770,12 +953,23 @@ function ChatView({
               sender={msg.sender}
               displayName={msg.displayName}
               timestamp={msg.timestamp}
+              reactions={msg.reactions}
+              replyTo={msg.replyTo}
+              replyPreview={msg.replyPreview}
+              onReplyClick={msg.replyTo ? () => scrollToMessage(msg.replyTo!) : undefined}
+              onCopy={msg.kind === 'text' && msg.text ? () => handleCopyMessage(msg.text ?? '') : undefined}
+              onDownload={msg.kind === 'audio' && msg.audioUrl ? () => {
+                const a = document.createElement('a');
+                a.href = msg.audioUrl!;
+                a.download = `voice-note-${Date.now()}.webm`;
+                a.click();
+              } : undefined}
             />
           ))}
           <div ref={messagesEndRef} />
         </div>
         <ChatInput
-          onSend={onSend}
+          onSend={handleSend}
           onTyping={onTyping}
           disabled={true}
           maxLength={MAX_MESSAGE_LENGTH}
@@ -814,87 +1008,161 @@ function ChatView({
     );
   }
 
-  // phase === 'ready'
+  const isReady = phase === 'ready';
+  const isPeerDisconnected = phase === 'peer-disconnected';
+  const connectionQuality = deriveConnectionQuality(phase, messages);
+
+  const effectiveWarningSeconds = voiceNoteSizeWarningSeconds !== null && voiceNoteTimeWarningSeconds !== null
+    ? Math.min(voiceNoteSizeWarningSeconds, voiceNoteTimeWarningSeconds)
+    : voiceNoteSizeWarningSeconds ?? voiceNoteTimeWarningSeconds;
+
+  // phase === 'ready' or 'peer-disconnected'
   return (
     <div className={styles.wrapper}>
       <div className={styles.chatHeader}>
-        <StatusBadge phase='ready' />
-        {showEndForMeConfirm ? (
-          <div className={styles.confirmBar}>
-            <span className={styles.confirmText}>
-              Your partner will be notified that you left. Continue?
-            </span>
+        <div className={styles.headerLeft}>
+          <StatusBadge phase={isReady ? 'ready' : 'peer-disconnected'} connectionQuality={connectionQuality} />
+          <InactivityCountdown
+            remainingSeconds={remainingSeconds}
+            warningThresholdSeconds={INACTIVITY_WARNING_THRESHOLD_S}
+            urgentThresholdSeconds={INACTIVITY_URGENT_THRESHOLD_S}
+          />
+        </div>
+        <div className={styles.headerActions}>
+          {showEndForMeOptions ? (
+            <div className={styles.confirmBar}>
+              <span className={styles.confirmText}>
+                How would you like to leave?
+              </span>
+              <Button
+                intent='destructive'
+                onClick={() => {
+                  setShowEndForMeOptions(false);
+                  onEnd();
+                }}
+              >
+                Silent exit
+              </Button>
+              <Button
+                intent='destructive'
+                onClick={() => {
+                  setShowEndForMeOptions(false);
+                  onEndForAll();
+                }}
+              >
+                Notify partner
+              </Button>
+              <Button
+                intent='neutral'
+                onClick={() => setShowEndForMeOptions(false)}
+              >
+                Cancel
+              </Button>
+            </div>
+          ) : showEndConfirm ? (
+            <div className={styles.confirmBar}>
+              <span className={styles.confirmText}>End for both?</span>
+              <Button
+                intent='destructive'
+                onClick={() => {
+                  setShowEndConfirm(false);
+                  onEndForAll();
+                }}
+              >
+                Yes
+              </Button>
+              <Button
+                intent='neutral'
+                onClick={() => setShowEndConfirm(false)}
+              >
+                Cancel
+              </Button>
+            </div>
+          ) : (
+            <div className={styles.endButtons}>
+              <Button
+                intent='destructive'
+                onClick={() => setShowEndForMeOptions(true)}
+                aria-label='End chat for me'
+              >
+                End for me
+              </Button>
+              <Button
+                intent='destructive'
+                onClick={() => setShowEndConfirm(true)}
+                aria-label='End chat for everyone'
+              >
+                End for everyone
+              </Button>
+            </div>
+          )}
+          <div className={styles.localSettingsWrapper} ref={localSettingsRef}>
             <button
-              className={styles.confirmYes}
-              onClick={() => {
-                setShowEndForMeConfirm(false);
-                onEnd();
-              }}
+              type='button'
+              className={`${styles.localGearButton} ${localSettingsOpen ? styles.gearButtonActive : ''}`}
+              onClick={() => setLocalSettingsOpen(prev => !prev)}
+              title='Local settings'
             >
-              Yes
+              <IconGear size={21} />
             </button>
-            <button
-              className={styles.confirmCancel}
-              onClick={() => setShowEndForMeConfirm(false)}
-            >
-              Cancel
-            </button>
+            {localSettingsOpen && (
+              <div className={styles.localSettingsDropdown}>
+                <div className={styles.settingsRow}>
+                  <label className={styles.settingsLabel}>Auto-scroll</label>
+                  <OnOffToggle
+                    enabled={localSettings.autoScroll}
+                    onToggle={() => updateSetting('autoScroll', !localSettings.autoScroll)}
+                  />
+                </div>
+                <div className={styles.settingsRow}>
+                  <label className={styles.settingsLabel}>Beep sound</label>
+                  <OnOffToggle
+                    enabled={localSettings.soundEnabled}
+                    onToggle={() => updateSetting('soundEnabled', !localSettings.soundEnabled)}
+                  />
+                </div>
+              </div>
+            )}
           </div>
-        ) : showEndConfirm ? (
-          <div className={styles.confirmBar}>
-            <span className={styles.confirmText}>End for both?</span>
-            <button
-              className={styles.confirmYes}
-              onClick={() => {
-                setShowEndConfirm(false);
-                onEndForAll();
-              }}
-            >
-              Yes
-            </button>
-            <button
-              className={styles.confirmCancel}
-              onClick={() => setShowEndConfirm(false)}
-            >
-              Cancel
-            </button>
-          </div>
-        ) : (
-          <div className={styles.endButtons}>
-            <button
-              className={styles.endButton}
-              onClick={() => setShowEndForMeConfirm(true)}
-              aria-label='End chat for me'
-            >
-              End for me
-            </button>
-            <button
-              className={styles.endButton}
-              onClick={() => setShowEndConfirm(true)}
-              aria-label='End chat for everyone'
-            >
-              End for everyone
-            </button>
-          </div>
-        )}
+        </div>
       </div>
-      <VoiceControls
-        callState={voice.callState}
-        isMuted={voice.isMuted}
-        callDuration={voice.callDuration}
-        privacyAcknowledged={voice.privacyAcknowledged}
-        onStartCall={voice.startCall}
-        onAcceptCall={voice.acceptCall}
-        onDeclineCall={voice.declineCall}
-        onEndCall={voice.endCall}
-        onToggleMute={voice.toggleMute}
-        onAcknowledgePrivacy={voice.acknowledgePrivacy}
-        onResetCallState={voice.resetCallState}
-      />
-      <div className={styles.messageList} role='list' aria-label='Messages'>
+      {isPeerDisconnected && (
+        <div className={styles.reconnectingIndicator}>
+          Partner disconnected, waiting for reconnection...
+        </div>
+      )}
+      {isReady && (
+        <VoiceControls
+          callState={voice.callState}
+          isMuted={voice.isMuted}
+          callDuration={voice.callDuration}
+          privacyAcknowledged={voice.privacyAcknowledged}
+          isScreenSharing={voice.isScreenSharing}
+          onStartCall={voice.startCall}
+          onAcceptCall={voice.acceptCall}
+          onDeclineCall={voice.declineCall}
+          onEndCall={voice.endCall}
+          onToggleMute={voice.toggleMute}
+          onAcknowledgePrivacy={voice.acknowledgePrivacy}
+          onResetCallState={voice.resetCallState}
+          onStartScreenShare={voice.startScreenShare}
+          onStopScreenShare={voice.stopScreenShare}
+        />
+      )}
+      {voice.remoteScreenStream && (
+        <ScreenShareView stream={voice.remoteScreenStream} />
+      )}
+      <div
+        ref={messageListRef}
+        className={styles.messageList}
+        role='list'
+        aria-label='Messages'
+        onScroll={handleMessageListScroll}
+      >
           {messages.map((msg) => (
             <MessageBubble
               key={msg.id}
+              msgId={msg.id}
               kind={msg.kind}
               text={msg.text}
               audioUrl={msg.audioUrl}
@@ -902,6 +1170,19 @@ function ChatView({
               sender={msg.sender}
               displayName={msg.displayName}
               timestamp={msg.timestamp}
+              reactions={msg.reactions}
+              replyTo={msg.replyTo}
+              replyPreview={msg.replyPreview}
+              onReact={isReady ? (emoji) => handleReact(msg.id, emoji) : undefined}
+              onReply={isReady ? () => { setReplyingTo(msg); setInputFocusTrigger(c => c + 1); } : undefined}
+              onReplyClick={msg.replyTo ? () => scrollToMessage(msg.replyTo!) : undefined}
+              onCopy={msg.kind === 'text' && msg.text ? () => handleCopyMessage(msg.text ?? '') : undefined}
+              onDownload={msg.kind === 'audio' && msg.audioUrl ? () => {
+                const a = document.createElement('a');
+                a.href = msg.audioUrl!;
+                a.download = `voice-note-${Date.now()}.webm`;
+                a.click();
+              } : undefined}
             />
           ))}
         {peerTyping && (
@@ -915,12 +1196,29 @@ function ChatView({
           </div>
         )}
         <div ref={messagesEndRef} />
+        {unreadBelow > 0 && (
+          <button
+            className={styles.newMessagesPill}
+            onClick={scrollToBottom}
+            type='button'
+          >
+            &darr; {unreadBelow} new message{unreadBelow > 1 ? 's' : ''}
+          </button>
+        )}
       </div>
+      {replyingTo && (
+        <ReplyPreview
+          text={replyingTo.kind === 'audio' ? '(voice note)' : (replyingTo.text ?? '')}
+          displayName={replyingTo.displayName}
+          onCancel={() => setReplyingTo(null)}
+        />
+      )}
       <ChatInput
-        onSend={onSend}
-        onTyping={onTyping}
-        disabled={usernameModeEnabled && !localUsername}
+        onSend={handleSend}
+        onTyping={handleTyping}
+        disabled={(usernameModeEnabled && !localUsername) || isPeerDisconnected}
         maxLength={MAX_MESSAGE_LENGTH}
+        focusTrigger={inputFocusTrigger}
         isRecording={isRecordingNote}
         isSendingVoiceNote={isSendingVoiceNote}
         recordingDuration={recordingDuration}
@@ -928,7 +1226,7 @@ function ChatView({
         onStopRecording={stopVoiceNoteRecording}
         onCancelRecording={cancelVoiceNoteRecording}
         voiceNoteError={voiceNoteError}
-        voiceNoteSizeWarningSeconds={voiceNoteSizeWarningSeconds}
+        voiceNoteSizeWarningSeconds={effectiveWarningSeconds}
       />
       {usernameModeEnabled && !localUsername && (
         <div className={styles.usernameModalBackdrop}>

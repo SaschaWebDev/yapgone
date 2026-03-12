@@ -1,23 +1,43 @@
+.bubbleWrapper {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  max-width: 50%;
+  min-width: 37%;
+}
+
+.bubbleWrapperSelf {
+  align-self: flex-end;
+}
+
+.bubbleWrapperPeer {
+  align-self: flex-start;
+}
+
+.bubbleWrapperAudio {
+  min-width: 15.625rem;
+  max-width: 15.625rem;
+}
+
 .bubble {
-  max-width: 75%;
+  position: relative;
   padding: 0.6rem 0.85rem;
   border-radius: var(--radius-lg);
-  animation: slideUp 0.2s ease-out;
   word-break: break-word;
 }
 
 .self {
-  align-self: flex-end;
   background: var(--accent);
   color: #fff;
   border-bottom-right-radius: var(--radius-sm);
+  animation: slideInRight 0.25s ease-out;
 }
 
 .peer {
-  align-self: flex-start;
   background: var(--bg-card);
   color: var(--text-primary);
   border-bottom-left-radius: var(--radius-sm);
+  animation: slideInLeft 0.25s ease-out;
 }
 
 .text {
@@ -33,13 +53,187 @@
   margin-bottom: 0.2rem;
 }
 
+/* Quote block for replies */
+.quoteBlock {
+  padding: 0.3rem 0.5rem;
+  margin-bottom: 0.35rem;
+  border-left: 3px solid currentColor;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  opacity: 0.7;
+}
+
+.self .quoteBlock {
+  background: rgba(255, 255, 255, 0.12);
+  border-left-color: rgba(255, 255, 255, 0.5);
+}
+
+.peer .quoteBlock {
+  background: rgba(var(--fg), 0.05);
+  border-left-color: var(--accent);
+}
+
+.quoteBlockClickable {
+  cursor: pointer;
+}
+
+.quoteBlockClickable:hover {
+  opacity: 0.85;
+}
+
+.quoteText {
+  font-size: 0.78rem;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Reply button — visible on hover */
+.replyButton {
+  position: absolute;
+  top: 2px;
+  opacity: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: opacity 0.15s;
+  z-index: 2;
+}
+
+.self .replyButton {
+  left: -38px;
+}
+
+.peer .replyButton {
+  right: -38px;
+}
+
+.bubble:hover .replyButton {
+  opacity: 1;
+}
+
+.replyButton:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.replyButton svg, .emojiTrigger svg,
+.copyButton svg, .downloadActionButton svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* Emoji trigger — visible on hover */
+.emojiTrigger {
+  position: absolute;
+  top: 39px;
+  opacity: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: opacity 0.15s;
+  z-index: 2;
+}
+
+.self .emojiTrigger {
+  left: -38px;
+}
+
+.peer .emojiTrigger {
+  right: -38px;
+}
+
+.bubble:hover .emojiTrigger {
+  opacity: 1;
+}
+
+.emojiTrigger:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Reaction bar */
+.reactionBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.2rem;
+  align-self: flex-start;
+}
+
+.reactionBarSelf {
+  align-self: flex-end;
+}
+
+.reactionBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.1rem 0.4rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
+.reactionBadge:hover {
+  border-color: var(--accent);
+}
+
+.reactionBadgeSelf {
+  background: rgba(var(--accent-rgb), 0.08);
+  border-color: rgba(var(--accent-rgb), 0.25);
+}
+
+.reactionEmoji {
+  font-size: 0.85rem;
+}
+
+.reactionCount {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Emoji picker anchor */
+.pickerAnchor {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 0.3rem;
+  z-index: 10;
+}
+
+.pickerAnchorSelf {
+  left: auto;
+  right: 0;
+}
+
 /* Custom audio player */
 .audioPlayer {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  min-width: 200px;
-  padding: 0.15rem 0;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-height: 4.2rem;
 }
 
 .audioControls {
@@ -64,8 +258,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 1.75rem;
+  height: 1.75rem;
   border-radius: 50%;
   border: none;
   cursor: pointer;
@@ -89,11 +283,21 @@
 
 .progressTrack {
   flex: 1;
-  height: 4px;
-  border-radius: 2px;
+  height: 5px;
+  border-radius: 2.5px;
   cursor: pointer;
   position: relative;
-  min-width: 80px;
+  min-width: 3.75rem;
+}
+
+/* Invisible expanded click area */
+.progressTrack::before {
+  content: '';
+  position: absolute;
+  top: -0.5rem;
+  bottom: -0.5rem;
+  left: 0;
+  right: 0;
 }
 
 .progressTrackSelf {
@@ -106,8 +310,9 @@
 
 .progressFill {
   height: 100%;
-  border-radius: 2px;
+  border-radius: 1px;
   transition: width 0.1s linear;
+  pointer-events: none;
 }
 
 .progressFillSelf {
@@ -159,38 +364,6 @@
   color: var(--accent);
 }
 
-/* Download button */
-.downloadButton {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  border: none;
-  cursor: pointer;
-  flex-shrink: 0;
-  opacity: 0;
-  transition: opacity 0.15s;
-  background: transparent;
-}
-
-.audioMeta:hover .downloadButton {
-  opacity: 0.6;
-}
-
-.downloadButton:hover {
-  opacity: 1 !important;
-}
-
-.downloadButtonSelf {
-  color: #fff;
-}
-
-.downloadButtonPeer {
-  color: var(--accent);
-}
-
 .audioDuration {
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
@@ -223,4 +396,167 @@
   color: var(--text-tertiary);
   font-style: italic;
   text-align: center;
+}
+
+/* Text formatting */
+.text :global(.msgBold) { font-weight: 600; }
+.text :global(.msgItalic) { font-style: italic; }
+
+/* Copy / Download action button — visible on hover */
+.copyButton,
+.downloadActionButton {
+  position: absolute;
+  top: 76px;
+  opacity: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: opacity 0.15s;
+  z-index: 2;
+}
+
+.self .copyButton,
+.self .downloadActionButton {
+  left: -38px;
+}
+
+.peer .copyButton,
+.peer .downloadActionButton {
+  right: -38px;
+}
+
+.bubble:hover .copyButton,
+.bubble:hover .downloadActionButton {
+  opacity: 1;
+}
+
+.copyButton:hover,
+.downloadActionButton:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.copyDone {
+  color: var(--success, #22c55e);
+  border-color: var(--success, #22c55e);
+}
+
+/* Compact action buttons for short messages */
+.compactActions .replyButton,
+.compactActions .emojiTrigger,
+.compactActions .copyButton,
+.compactActions .downloadActionButton {
+  width: 28px;
+  height: 28px;
+}
+
+.compactActions .replyButton svg,
+.compactActions .emojiTrigger svg,
+.compactActions .copyButton svg,
+.compactActions .downloadActionButton svg {
+  width: 15px;
+  height: 15px;
+}
+
+.compactActions .replyButton { top: 1px; }
+.compactActions .emojiTrigger { top: 32px; }
+.compactActions .copyButton { top: 63px; }
+.compactActions .downloadActionButton { top: 63px; }
+
+.compactActions.self .replyButton,
+.compactActions.self .emojiTrigger,
+.compactActions.self .copyButton,
+.compactActions.self .downloadActionButton {
+  left: -34px;
+}
+
+.compactActions.peer .replyButton,
+.compactActions.peer .emojiTrigger,
+.compactActions.peer .copyButton,
+.compactActions.peer .downloadActionButton {
+  right: -34px;
+}
+
+/* Links inside messages */
+.text :global(.messageLink) {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+  opacity: 0.85;
+  transition: opacity 0.15s;
+}
+
+.text :global(.messageLink):hover {
+  opacity: 1;
+}
+
+.peer .text :global(.messageLink) {
+  color: var(--accent);
+  opacity: 1;
+}
+
+.peer .text :global(.messageLink):hover {
+  opacity: 0.8;
+}
+
+/* Audio action buttons — fill ~130px bubble */
+.audioActions .replyButton,
+.audioActions .emojiTrigger,
+.audioActions .copyButton,
+.audioActions .downloadActionButton {
+  width: 32px;
+  height: 32px;
+}
+
+.audioActions .replyButton svg,
+.audioActions .emojiTrigger svg,
+.audioActions .copyButton svg,
+.audioActions .downloadActionButton svg {
+  width: 18px;
+  height: 18px;
+}
+
+.audioActions .replyButton { top: 0px; }
+.audioActions .emojiTrigger { top: 37px; }
+.audioActions .downloadActionButton { top: 74px; }
+
+.audioActions.self .replyButton,
+.audioActions.self .emojiTrigger,
+.audioActions.self .downloadActionButton {
+  left: -38px;
+}
+
+.audioActions.peer .replyButton,
+.audioActions.peer .emojiTrigger,
+.audioActions.peer .downloadActionButton {
+  right: -38px;
+}
+
+.highlighted {
+  animation: highlightFlash 1.5s ease-out;
+}
+
+.noAnimation { animation: none !important; }
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(12px) translateY(4px); }
+  to   { opacity: 1; transform: translateX(0) translateY(0); }
+}
+
+@keyframes highlightFlash {
+  0%   { background: rgba(var(--accent-rgb), 0.25); }
+  100% { background: transparent; }
+}
+
+@keyframes slideInLeft {
+  from { opacity: 0; transform: translateX(-12px) translateY(4px); }
+  to   { opacity: 1; transform: translateX(0) translateY(0); }
 }

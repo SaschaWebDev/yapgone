@@ -7,6 +7,7 @@ interface ChatInputProps {
   onTyping: (active: boolean) => void
   disabled: boolean
   maxLength: number
+  focusTrigger?: number
   isRecording?: boolean
   isSendingVoiceNote?: boolean
   recordingDuration?: number
@@ -30,6 +31,7 @@ export function ChatInput({
   onTyping,
   disabled,
   maxLength,
+  focusTrigger,
   isRecording = false,
   isSendingVoiceNote = false,
   recordingDuration = 0,
@@ -53,10 +55,81 @@ export function ChatInput({
   }, [canAutoFocus])
 
   useEffect(() => {
+    if (focusTrigger && canAutoFocus && textareaRef.current) {
+      textareaRef.current.focus()
+    }
+  }, [focusTrigger, canAutoFocus])
+
+  useEffect(() => {
     return () => {
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current)
       }
+    }
+  }, [])
+
+  const wrapSelection = useCallback((marker: string) => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+
+    const start = textarea.selectionStart
+    const end = textarea.selectionEnd
+    const value = textRef.current
+    const markerLen = marker.length
+
+    if (start === end) {
+      // No selection: insert empty markers at cursor
+      const newValue = value.slice(0, start) + marker + marker + value.slice(end)
+      setText(newValue)
+      textRef.current = newValue
+      requestAnimationFrame(() => {
+        textarea.selectionStart = textarea.selectionEnd = start + markerLen
+      })
+      return
+    }
+
+    const selected = value.slice(start, end)
+
+    // Check if already wrapped (markers outside selection)
+    const beforeStart = start - markerLen
+    const afterEnd = end + markerLen
+    const markersOutside =
+      beforeStart >= 0 &&
+      afterEnd <= value.length &&
+      value.slice(beforeStart, start) === marker &&
+      value.slice(end, afterEnd) === marker
+
+    // Check if already wrapped (markers inside selection)
+    const markersInside =
+      selected.startsWith(marker) &&
+      selected.endsWith(marker) &&
+      selected.length > 2 * markerLen
+
+    if (markersOutside) {
+      const newValue = value.slice(0, beforeStart) + selected + value.slice(afterEnd)
+      setText(newValue)
+      textRef.current = newValue
+      requestAnimationFrame(() => {
+        textarea.selectionStart = beforeStart
+        textarea.selectionEnd = beforeStart + selected.length
+      })
+    } else if (markersInside) {
+      const unwrapped = selected.slice(markerLen, -markerLen)
+      const newValue = value.slice(0, start) + unwrapped + value.slice(end)
+      setText(newValue)
+      textRef.current = newValue
+      requestAnimationFrame(() => {
+        textarea.selectionStart = start
+        textarea.selectionEnd = start + unwrapped.length
+      })
+    } else {
+      const newValue = value.slice(0, start) + marker + selected + marker + value.slice(end)
+      setText(newValue)
+      textRef.current = newValue
+      requestAnimationFrame(() => {
+        textarea.selectionStart = start + markerLen
+        textarea.selectionEnd = end + markerLen
+      })
     }
   }, [])
 
@@ -78,11 +151,22 @@ export function ChatInput({
   }, [text, disabled, onSend, onTyping])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    const mod = e.ctrlKey || e.metaKey
+    if (mod && e.key === 'b') {
+      e.preventDefault()
+      wrapSelection('**')
+      return
+    }
+    if (mod && e.key === 'i') {
+      e.preventDefault()
+      wrapSelection('*')
+      return
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSend()
     }
-  }, [handleSend])
+  }, [handleSend, wrapSelection])
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value.slice(0, maxLength)
@@ -113,7 +197,7 @@ export function ChatInput({
   const showMic = !text.trim() && !disabled && !isRecording && !isSendingVoiceNote && !!onStartRecording
 
   const sendIcon = (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <line x1="22" y1="2" x2="11" y2="13" />
       <polygon points="22 2 15 22 11 13 2 9 22 2" />
     </svg>
@@ -144,7 +228,7 @@ export function ChatInput({
             onClick={onCancelRecording}
             aria-label="Cancel recording"
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18" />
               <line x1="6" y1="6" x2="18" y2="18" />
             </svg>
@@ -176,7 +260,7 @@ export function ChatInput({
             onClick={onStartRecording}
             aria-label="Record voice note"
           >
-            <IconMic size={20} />
+            <IconMic size={30} />
           </button>
         ) : (
           <button
@@ -190,6 +274,9 @@ export function ChatInput({
         )}
       </div>
       {voiceNoteError && <span className={styles.voiceNoteError}>{voiceNoteError}</span>}
+      {maxLength - text.length <= 0 && (
+        <span className={styles.charLimitMax}>Character limit reached</span>
+      )}
     </div>
   )
 }

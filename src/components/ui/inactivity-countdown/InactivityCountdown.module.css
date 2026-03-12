@@ -1,0 +1,21 @@
+.countdown {
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+  transition: color 0.3s ease;
+  user-select: none;
+}
+
+.warning {
+  color: var(--warning);
+}
+
+.urgent {
+  color: var(--error);
+  animation: urgentPulse 2s ease-in-out infinite;
+}
+
+@keyframes urgentPulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}

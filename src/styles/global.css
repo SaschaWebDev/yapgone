@@ -11,6 +11,7 @@
 
 html {
   color-scheme: dark;
+  font-size: 150%;
 }
 
 [data-theme="light"] {

@@ -24,8 +24,8 @@
   line-height: 1.5;
   resize: none;
   outline: none;
-  min-height: 44px;
-  max-height: 120px;
+  min-height: 2.75rem;
+  max-height: 7.5rem;
 }
 
 .input::placeholder {
@@ -45,8 +45,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
+  width: 2.75rem;
+  height: 2.75rem;
   background: var(--accent);
   color: #fff;
   border: none;
@@ -68,8 +68,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
+  width: 2.75rem;
+  height: 2.75rem;
   background: transparent;
   color: var(--text-secondary);
   border: 1px solid var(--border);
@@ -93,12 +93,12 @@
   border: 1px solid var(--error);
   border-radius: var(--radius-md);
   padding: 0 0.85rem;
-  min-height: 44px;
+  min-height: 2.75rem;
 }
 
 .recordingDot {
-  width: 8px;
-  height: 8px;
+  width: 0.5rem;
+  height: 0.5rem;
   border-radius: 50%;
   background: var(--error);
   flex-shrink: 0;
@@ -120,8 +120,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
+  width: 2.75rem;
+  height: 2.75rem;
   background: transparent;
   color: var(--text-secondary);
   border: 1px solid var(--border);
@@ -149,4 +149,11 @@
   font-size: 0.75rem;
   color: var(--error);
   padding-left: 0.1rem;
+}
+
+.charLimitMax {
+  font-size: 0.75rem;
+  color: var(--error);
+  text-align: right;
+  padding-right: 0.1rem;
 }

@@ -1,0 +1,21 @@
+.container {
+  max-height: 50vh;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--bg-secondary, rgba(var(--fg), 0.03));
+  animation: fadeIn 0.2s ease-out;
+}
+
+.video {
+  display: block;
+  width: 100%;
+  max-height: 50vh;
+  object-fit: contain;
+  background: #000;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

@@ -6,9 +6,9 @@ describe('useChat types', () => {
   it('ChatPhase includes all expected phases', () => {
     const phases: ChatPhase[] = [
       'creating', 'waiting', 'connecting', 'key-exchange',
-      'ready', 'peer-left', 'expired', 'room-closed', 'error',
+      'ready', 'peer-left', 'peer-disconnected', 'expired', 'room-closed', 'error',
     ]
-    expect(phases).toHaveLength(9)
+    expect(phases).toHaveLength(10)
   })
 
   it('ChatMessage has expected shape', () => {
@@ -18,6 +18,7 @@ describe('useChat types', () => {
       text: 'hello',
       sender: 'self',
       timestamp: Date.now(),
+      reactions: [],
     }
     expect(msg.sender).toBe('self')
     expect(typeof msg.id).toBe('string')
@@ -31,6 +32,7 @@ describe('useChat types', () => {
       text: 'from peer',
       sender: 'peer',
       timestamp: Date.now(),
+      reactions: [],
     }
     expect(msg.sender).toBe('peer')
   })
@@ -43,6 +45,7 @@ describe('useChat types', () => {
       durationMs: 1200,
       sender: 'peer',
       timestamp: Date.now(),
+      reactions: [],
     }
     expect(msg.kind).toBe('audio')
     expect(msg.audioUrl).toContain('blob:')

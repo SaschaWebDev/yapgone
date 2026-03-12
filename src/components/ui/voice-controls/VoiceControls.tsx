@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import type { CallState } from '@/types'
-import { IconPhone, IconMic, IconMicOff } from '../icons'
+import { Button } from '../button'
+import { IconPhone, IconMic, IconMicOff, IconScreenShare, IconScreenShareOff } from '../icons'
 import styles from './VoiceControls.module.css'
 
 type PrivacyAction = 'start' | 'accept'
@@ -14,6 +15,7 @@ interface VoiceControlsProps {
   isMuted: boolean
   callDuration: number
   privacyAcknowledged: boolean
+  isScreenSharing: boolean
   onStartCall: () => void
   onAcceptCall: () => void
   onDeclineCall: () => void
@@ -21,6 +23,8 @@ interface VoiceControlsProps {
   onToggleMute: () => void
   onAcknowledgePrivacy: () => void
   onResetCallState: () => void
+  onStartScreenShare: () => void
+  onStopScreenShare: () => void
 }
 
 function formatDuration(seconds: number): string {
@@ -34,6 +38,7 @@ export function VoiceControls({
   isMuted,
   callDuration,
   privacyAcknowledged,
+  isScreenSharing,
   onStartCall,
   onAcceptCall,
   onDeclineCall,
@@ -41,6 +46,8 @@ export function VoiceControls({
   onToggleMute,
   onAcknowledgePrivacy,
   onResetCallState,
+  onStartScreenShare,
+  onStopScreenShare,
 }: VoiceControlsProps) {
   const [showPrivacyNotice, setShowPrivacyNotice] = useState(false)
   const [pendingPrivacyAction, setPendingPrivacyAction] = useState<PrivacyAction | null>(null)
@@ -162,18 +169,12 @@ export function VoiceControls({
           visible to them. Use a VPN if this concerns you.
         </p>
         <div className={styles.privacyActions}>
-          <button
-            className={styles.privacyCancel}
-            onClick={handlePrivacyCancel}
-          >
+          <Button intent='neutral' size='sm' onClick={handlePrivacyCancel}>
             Cancel
-          </button>
-          <button
-            className={styles.privacyAccept}
-            onClick={handlePrivacyAccept}
-          >
+          </Button>
+          <Button intent='positive' size='sm' onClick={handlePrivacyAccept}>
             I understand, continue
-          </button>
+          </Button>
         </div>
       </div>
     )
@@ -188,7 +189,7 @@ export function VoiceControls({
           title="Start voice call"
           aria-label="Start voice call"
         >
-          <IconPhone size={14} />
+          <IconPhone size={21} />
           <span className={styles.callLabel}>Voice Call</span>
         </button>
       </div>
@@ -200,9 +201,9 @@ export function VoiceControls({
       <div className={styles.wrapper}>
         <div className={styles.banner}>
           <span className={styles.bannerText}>Calling...</span>
-          <button className={styles.cancelButton} onClick={onEndCall}>
+          <Button intent='neutral' size='sm' onClick={onEndCall}>
             Cancel
-          </button>
+          </Button>
         </div>
       </div>
     )
@@ -231,7 +232,7 @@ export function VoiceControls({
             title="Accept call"
             aria-label="Accept call"
           >
-            <IconPhone size={14} />
+            <IconPhone size={21} />
           </button>
           <button
             className={styles.declineButton}
@@ -239,7 +240,7 @@ export function VoiceControls({
             title="Decline call"
             aria-label="Decline call"
           >
-            <IconPhone size={14} style={{ transform: 'rotate(135deg)' }} />
+            <IconPhone size={21} style={{ transform: 'rotate(135deg)' }} />
           </button>
         </div>
       </div>
@@ -251,9 +252,9 @@ export function VoiceControls({
       <div className={styles.wrapper}>
         <div className={styles.banner}>
           <span className={styles.bannerText}>Connecting...</span>
-          <button className={styles.cancelButton} onClick={onEndCall}>
+          <Button intent='neutral' size='sm' onClick={onEndCall}>
             Cancel
-          </button>
+          </Button>
         </div>
       </div>
     )
@@ -271,15 +272,27 @@ export function VoiceControls({
           title={isMuted ? 'Unmute' : 'Mute'}
           aria-label={isMuted ? 'Unmute microphone' : 'Mute microphone'}
         >
-          {isMuted ? <IconMicOff size={14} /> : <IconMic size={14} />}
+          {isMuted ? <IconMicOff size={21} /> : <IconMic size={21} />}
         </button>
+        {typeof navigator !== 'undefined' &&
+          navigator.mediaDevices &&
+          typeof navigator.mediaDevices.getDisplayMedia === 'function' && (
+          <button
+            className={isScreenSharing ? styles.screenShareActiveButton : styles.screenShareButton}
+            onClick={isScreenSharing ? onStopScreenShare : onStartScreenShare}
+            title={isScreenSharing ? 'Stop sharing screen' : 'Share screen'}
+            aria-label={isScreenSharing ? 'Stop sharing screen' : 'Share screen'}
+          >
+            {isScreenSharing ? <IconScreenShareOff size={21} /> : <IconScreenShare size={21} />}
+          </button>
+        )}
         <button
           className={styles.endCallButton}
           onClick={onEndCall}
           title="End call"
           aria-label="End call"
         >
-          <IconPhone size={14} style={{ transform: 'rotate(135deg)' }} />
+          <IconPhone size={21} style={{ transform: 'rotate(135deg)' }} />
         </button>
       </div>
     )
@@ -297,9 +310,9 @@ export function VoiceControls({
     return (
       <div className={styles.wrapper}>
         <span className={styles.failedText}>Voice unavailable</span>
-        <button className={styles.retryButton} onClick={onResetCallState}>
+        <Button intent='neutral' size='sm' onClick={onResetCallState}>
           Dismiss
-        </button>
+        </Button>
       </div>
     )
   }

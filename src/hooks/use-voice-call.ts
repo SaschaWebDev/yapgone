@@ -1,10 +1,13 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import type { RefObject } from 'react'
 import type { VoiceSignal, CallState } from '@/types'
+import { buf } from '@/crypto/buffer'
+import { createMediaCryptoWorker } from '@/workers/create-media-crypto-worker'
 import { z } from 'zod'
 import {
   VOICE_CONNECT_TIMEOUT_MS,
   VOICE_DISCONNECTED_GRACE_MS,
+  VOICE_E2EE_ENABLED,
 } from '@/constants'
 
 const ICE_SERVERS: RTCIceServer[] = [
@@ -28,6 +31,7 @@ interface UseVoiceCallOptions {
   sendSignal: (signal: VoiceSignal) => void
   onSignalRef: RefObject<((signal: VoiceSignal) => void) | null>
   peerConnected: boolean
+  mediaKeyRaw: Uint8Array | null
 }
 
 export type IceHandlingStrategy = 'buffer-pre-pc' | 'buffer-pre-remote' | 'apply-now'
@@ -67,11 +71,14 @@ export function useVoiceCall({
   sendSignal,
   onSignalRef,
   peerConnected,
+  mediaKeyRaw,
 }: UseVoiceCallOptions) {
   const [callState, setCallState] = useState<CallState>('idle')
   const [isMuted, setIsMuted] = useState(false)
   const [callDuration, setCallDuration] = useState(0)
   const [privacyAcknowledged, setPrivacyAcknowledged] = useState(false)
+  const [isScreenSharing, setIsScreenSharing] = useState(false)
+  const [remoteScreenStream, setRemoteScreenStream] = useState<MediaStream | null>(null)
 
   const pcRef = useRef<RTCPeerConnection | null>(null)
   const localStreamRef = useRef<MediaStream | null>(null)
@@ -85,8 +92,13 @@ export function useVoiceCall({
   const preRemoteDescIceCandidatesRef = useRef<z.infer<typeof IceCandidateInitSchema>[]>([])
   const pendingOfferRef = useRef<string | null>(null)
   const pendingAnswerRef = useRef<string | null>(null)
+  const mediaWorkersRef = useRef<Array<{ worker: Worker; cleanup: () => void }>>([])
+  const screenStreamRef = useRef<MediaStream | null>(null)
+  const screenSenderRef = useRef<RTCRtpSender | null>(null)
+  const mediaKeyRawRef = useRef<Uint8Array | null>(mediaKeyRaw)
 
   stateRef.current = callState
+  mediaKeyRawRef.current = mediaKeyRaw
 
   const clearConnectingTimeout = useCallback(() => {
     if (connectingTimeoutRef.current) {
@@ -100,6 +112,23 @@ export function useVoiceCall({
       clearTimeout(disconnectedTimeoutRef.current)
       disconnectedTimeoutRef.current = null
     }
+  }, [])
+
+  const terminateMediaWorkers = useCallback(() => {
+    for (const entry of mediaWorkersRef.current) {
+      entry.cleanup()
+    }
+    mediaWorkersRef.current = []
+  }, [])
+
+  const cleanupScreenShare = useCallback(() => {
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach(t => t.stop())
+      screenStreamRef.current = null
+    }
+    screenSenderRef.current = null
+    setIsScreenSharing(false)
+    setRemoteScreenStream(null)
   }, [])
 
   const failCall = useCallback((notifyPeer: boolean) => {
@@ -116,6 +145,8 @@ export function useVoiceCall({
       localStreamRef.current.getTracks().forEach(t => t.stop())
       localStreamRef.current = null
     }
+    cleanupScreenShare()
+    terminateMediaWorkers()
     if (pcRef.current) {
       pcRef.current.close()
       pcRef.current = null
@@ -131,7 +162,7 @@ export function useVoiceCall({
     setCallDuration(0)
     callStartRef.current = 0
     setCallState('failed')
-  }, [sendSignal, clearConnectingTimeout, clearDisconnectedTimeout])
+  }, [sendSignal, clearConnectingTimeout, clearDisconnectedTimeout, cleanupScreenShare, terminateMediaWorkers])
 
   const cleanupCall = useCallback(() => {
     clearConnectingTimeout()
@@ -144,6 +175,8 @@ export function useVoiceCall({
       localStreamRef.current.getTracks().forEach(t => t.stop())
       localStreamRef.current = null
     }
+    cleanupScreenShare()
+    terminateMediaWorkers()
     if (pcRef.current) {
       pcRef.current.close()
       pcRef.current = null
@@ -158,7 +191,7 @@ export function useVoiceCall({
     setIsMuted(false)
     setCallDuration(0)
     callStartRef.current = 0
-  }, [clearConnectingTimeout, clearDisconnectedTimeout])
+  }, [clearConnectingTimeout, clearDisconnectedTimeout, cleanupScreenShare, terminateMediaWorkers])
 
   const startDurationTimer = useCallback(() => {
     callStartRef.current = Date.now()
@@ -187,8 +220,46 @@ export function useVoiceCall({
     }
   }, [addIceCandidateSafe])
 
+  const attachTransform = useCallback((
+    target: RTCRtpSender | RTCRtpReceiver,
+    direction: 'encrypt' | 'decrypt',
+  ): void => {
+    if (!VOICE_E2EE_ENABLED) return
+    if (!('createEncodedStreams' in target)) return
+
+    const { readable, writable } = target.createEncodedStreams()
+    const { worker, cleanup } = createMediaCryptoWorker()
+
+    const key = mediaKeyRawRef.current
+    if (key) {
+      const keyForMessage = buf(key)
+      worker.postMessage({ type: 'set-key', key: keyForMessage }, [keyForMessage])
+    }
+
+    worker.postMessage(
+      { type: 'start-transform', direction, readable, writable },
+      [readable, writable],
+    )
+
+    mediaWorkersRef.current.push({ worker, cleanup })
+  }, [])
+
+  const addTrackWithTransform = useCallback((
+    pc: RTCPeerConnection,
+    track: MediaStreamTrack,
+    stream: MediaStream,
+  ): RTCRtpSender => {
+    const sender = pc.addTrack(track, stream)
+    attachTransform(sender, 'encrypt')
+    return sender
+  }, [attachTransform])
+
   const createPeerConnection = useCallback(() => {
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+    const config: RTCConfiguration = { iceServers: ICE_SERVERS }
+    if (VOICE_E2EE_ENABLED) {
+      config.encodedInsertableStreams = true
+    }
+    const pc = new RTCPeerConnection(config)
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
@@ -200,6 +271,18 @@ export function useVoiceCall({
     }
 
     pc.ontrack = (event) => {
+      attachTransform(event.receiver, 'decrypt')
+
+      if (event.track.kind === 'video') {
+        const stream = event.streams[0] ?? new MediaStream([event.track])
+        setRemoteScreenStream(stream)
+        event.track.onended = () => {
+          setRemoteScreenStream(null)
+        }
+        return
+      }
+
+      // Audio track
       if (!remoteAudioRef.current) {
         remoteAudioRef.current = new Audio()
         remoteAudioRef.current.autoplay = true
@@ -255,6 +338,7 @@ export function useVoiceCall({
 
     return pc
   }, [
+    attachTransform,
     clearDisconnectedTimeout,
     clearConnectingTimeout,
     failCall,
@@ -301,7 +385,7 @@ export function useVoiceCall({
       sendSignal({ kind: 'voice-accept' })
       const stream = await acquireMedia()
       const pc = createPeerConnection()
-      stream.getTracks().forEach(t => pc.addTrack(t, stream))
+      stream.getTracks().forEach(t => addTrackWithTransform(pc, t, stream))
       const pendingOffer = pendingOfferRef.current
       if (pendingOffer) {
         pendingOfferRef.current = null
@@ -311,7 +395,7 @@ export function useVoiceCall({
       cleanupCall()
       setCallState('failed')
     }
-  }, [acquireMedia, applyOffer, createPeerConnection, sendSignal, cleanupCall])
+  }, [acquireMedia, applyOffer, createPeerConnection, addTrackWithTransform, sendSignal, cleanupCall])
 
   const declineCall = useCallback(() => {
     if (stateRef.current !== 'ringing') return
@@ -345,6 +429,65 @@ export function useVoiceCall({
     }
   }, [])
 
+  const stopScreenShare = useCallback(() => {
+    const pc = pcRef.current
+    const sender = screenSenderRef.current
+    if (pc && sender) {
+      pc.removeTrack(sender)
+      // Renegotiate SDP after track removal
+      void (async () => {
+        try {
+          const offer = await pc.createOffer()
+          await pc.setLocalDescription(offer)
+          sendSignal({ kind: 'sdp-offer', sdp: JSON.stringify(offer) })
+        } catch {
+          // non-fatal
+        }
+      })()
+    }
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach(t => t.stop())
+      screenStreamRef.current = null
+    }
+    screenSenderRef.current = null
+    setIsScreenSharing(false)
+    sendSignal({ kind: 'screen-share-stop' })
+  }, [sendSignal])
+
+  const startScreenShare = useCallback(async () => {
+    const pc = pcRef.current
+    if (!pc || stateRef.current !== 'active') return
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: false,
+      })
+      screenStreamRef.current = stream
+      const videoTrack = stream.getVideoTracks()[0]
+      if (!videoTrack) {
+        stream.getTracks().forEach(t => t.stop())
+        return
+      }
+      videoTrack.onended = () => {
+        stopScreenShare()
+      }
+      const sender = addTrackWithTransform(pc, videoTrack, stream)
+      screenSenderRef.current = sender
+      // Renegotiate SDP after adding track
+      const offer = await pc.createOffer()
+      await pc.setLocalDescription(offer)
+      sendSignal({ kind: 'sdp-offer', sdp: JSON.stringify(offer) })
+      setIsScreenSharing(true)
+      sendSignal({ kind: 'screen-share-start' })
+    } catch {
+      // User cancelled or error — clean up
+      if (screenStreamRef.current) {
+        screenStreamRef.current.getTracks().forEach(t => t.stop())
+        screenStreamRef.current = null
+      }
+    }
+  }, [addTrackWithTransform, sendSignal, stopScreenShare])
+
   const handleSignal = useCallback(async (signal: VoiceSignal) => {
     switch (signal.kind) {
       case 'voice-request': {
@@ -366,7 +509,7 @@ export function useVoiceCall({
           setCallState('connecting')
           const stream = await acquireMedia()
           const pc = createPeerConnection()
-          stream.getTracks().forEach(t => pc.addTrack(t, stream))
+          stream.getTracks().forEach(t => addTrackWithTransform(pc, t, stream))
           const offer = await pc.createOffer()
           await pc.setLocalDescription(offer)
           sendSignal({ kind: 'sdp-offer', sdp: JSON.stringify(offer) })
@@ -391,7 +534,7 @@ export function useVoiceCall({
       }
 
       case 'sdp-offer': {
-        if (stateRef.current !== 'connecting') break
+        if (stateRef.current !== 'connecting' && stateRef.current !== 'active') break
         if (!pcRef.current) {
           pendingOfferRef.current = signal.sdp
           break
@@ -406,7 +549,7 @@ export function useVoiceCall({
       }
 
       case 'sdp-answer': {
-        if (stateRef.current !== 'connecting') break
+        if (stateRef.current !== 'connecting' && stateRef.current !== 'active') break
         if (!pcRef.current) {
           pendingAnswerRef.current = signal.sdp
           break
@@ -451,10 +594,21 @@ export function useVoiceCall({
         }
         break
       }
+
+      case 'screen-share-start': {
+        // Informational — the actual track arrives via ontrack
+        break
+      }
+
+      case 'screen-share-stop': {
+        setRemoteScreenStream(null)
+        break
+      }
     }
   }, [
     acquireMedia,
     addIceCandidateSafe,
+    addTrackWithTransform,
     applyAnswer,
     applyOffer,
     createPeerConnection,
@@ -506,6 +660,8 @@ export function useVoiceCall({
     isMuted,
     callDuration,
     privacyAcknowledged,
+    isScreenSharing,
+    remoteScreenStream,
     startCall,
     acceptCall,
     declineCall,
@@ -513,5 +669,7 @@ export function useVoiceCall({
     toggleMute,
     acknowledgePrivacy,
     resetCallState,
+    startScreenShare,
+    stopScreenShare,
   }
 }

@@ -15,9 +15,11 @@ import {
   ratchetEncrypt,
   ratchetDecrypt,
   destroyState,
+  deriveMediaKeyRaw,
 } from '@/crypto'
-import { createWebSocket } from '@/ws/client'
-import type { ChatWebSocket, ClientMessage, ServerMessage } from '@/ws'
+import { createReconnectingWebSocket } from '@/ws/reconnecting-client'
+import type { ReconnectingChatWebSocket } from '@/ws/reconnecting-client'
+import type { ClientMessage, ServerMessage } from '@/ws'
 import type { RatchetState, VoiceSignal } from '@/types'
 import { createRoom, buildWsUrl, buildInviteFragment } from '@/api'
 import type { RoomSettings } from '@/room-settings'
@@ -36,9 +38,15 @@ export type ChatPhase =
   | 'key-exchange'
   | 'ready'
   | 'peer-left'
+  | 'peer-disconnected'
   | 'expired'
   | 'room-closed'
   | 'error'
+
+export interface MessageReaction {
+  emoji: string
+  fromSelf: boolean
+}
 
 export interface ChatMessage {
   id: string
@@ -49,13 +57,21 @@ export interface ChatMessage {
   sender: 'self' | 'peer' | 'system'
   displayName?: string
   timestamp: number
+  reactions: MessageReaction[]
+  replyTo?: string
+  replyPreview?: string
 }
 
 const SALT = new TextEncoder().encode('yapgone-chat-root')
 const INFO = new Uint8Array(0)
 
 const DecryptedPayloadSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('text'), content: z.string() }),
+  z.object({
+    kind: z.literal('text'),
+    content: z.string(),
+    msgId: z.string().min(1).max(32).optional(),
+    replyTo: z.string().min(1).max(32).optional(),
+  }),
   z.object({
     kind: z.literal('voice-note-meta'),
     noteId: z.string().min(1),
@@ -81,7 +97,15 @@ const DecryptedPayloadSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('sdp-answer'), sdp: z.string() }),
   z.object({ kind: z.literal('ice-candidate'), candidate: z.string() }),
   z.object({ kind: z.literal('voice-end') }),
+  z.object({ kind: z.literal('screen-share-start') }),
+  z.object({ kind: z.literal('screen-share-stop') }),
   z.object({ kind: z.literal('username-set'), username: z.string().min(1).max(24) }),
+  z.object({
+    kind: z.literal('reaction'),
+    msgId: z.string().min(1).max(32),
+    emoji: z.string().min(1).max(8),
+    action: z.enum(['add', 'remove']),
+  }),
 ])
 
 type VoiceHandlerRef = RefObject<((signal: VoiceSignal) => void) | null>
@@ -148,15 +172,17 @@ function buildAudioMessage(
   objectUrl: string,
   durationMs: number,
   displayName?: string,
+  id?: string,
 ): ChatMessage {
   return {
-    id: generateMessageId(),
+    id: id ?? generateMessageId(),
     kind: 'audio',
     audioUrl: objectUrl,
     durationMs,
     sender,
     displayName,
     timestamp: Date.now(),
+    reactions: [],
   }
 }
 
@@ -164,15 +190,45 @@ function buildTextMessage(
   sender: 'self' | 'peer' | 'system',
   text: string,
   displayName?: string,
+  id?: string,
 ): ChatMessage {
   return {
-    id: generateMessageId(),
+    id: id ?? generateMessageId(),
     kind: 'text',
     text,
     sender,
     displayName,
     timestamp: Date.now(),
+    reactions: [],
   }
+}
+
+function applyReaction(
+  messages: ChatMessage[],
+  msgId: string,
+  emoji: string,
+  action: 'add' | 'remove',
+  fromSelf: boolean,
+): ChatMessage[] {
+  return messages.map(msg => {
+    if (msg.id !== msgId) return msg
+    let reactions = [...msg.reactions]
+    if (action === 'add') {
+      reactions = reactions.filter(r => r.fromSelf !== fromSelf)
+      reactions = [...reactions, { emoji, fromSelf }]
+    } else {
+      reactions = reactions.filter(r => !(r.emoji === emoji && r.fromSelf === fromSelf))
+    }
+    return { ...msg, reactions }
+  })
+}
+
+function findReplyPreview(messages: ChatMessage[], replyTo: string): string | undefined {
+  const target = messages.find(m => m.id === replyTo)
+  if (!target) return undefined
+  if (target.kind === 'audio') return '(voice note)'
+  const text = target.text ?? ''
+  return text.length > 80 ? text.slice(0, 80) + '...' : text
 }
 
 const TYPING_SAFETY_TIMEOUT = 30_000
@@ -191,8 +247,9 @@ export function useChatAsCreator(
   )
   const [localUsername, setLocalUsername] = useState<string | null>(null)
   const [peerUsername, setPeerUsername] = useState<string | null>(null)
+  const [mediaKeyRaw, setMediaKeyRaw] = useState<Uint8Array | null>(null)
 
-  const wsRef = useRef<ChatWebSocket | null>(null)
+  const wsRef = useRef<ReconnectingChatWebSocket | null>(null)
   const ratchetRef = useRef<RatchetState | null>(null)
   const keyPairRef = useRef<CryptoKeyPair | null>(null)
   const roomIdRef = useRef<string | null>(null)
@@ -315,6 +372,7 @@ export function useChatAsCreator(
       objectUrl,
       assembly.durationMs,
       sender === 'peer' ? peerUsernameRef.current ?? undefined : localUsernameRef.current ?? undefined,
+      payload.noteId,
     )])
     voiceNoteAssembliesRef.current.delete(payload.noteId)
   }, [cleanupVoiceNoteAssemblies, trackAudioUrl])
@@ -338,6 +396,7 @@ export function useChatAsCreator(
     if (wsRef.current) {
       const ws = wsRef.current
       wsRef.current = null
+      ws.cancelReconnect()
       try { ws.send({ type: 'leave' }) } catch { /* ignore */ }
       setTimeout(() => ws.close(), 100)
     }
@@ -371,7 +430,7 @@ export function useChatAsCreator(
         setPhase('waiting')
 
         // Connect WebSocket
-        const ws = createWebSocket()
+        const ws = createReconnectingWebSocket()
         wsRef.current = ws
 
         ws.onOpen = () => {
@@ -386,16 +445,31 @@ export function useChatAsCreator(
 
         ws.onClose = (_code, reason) => {
           if (cancelled) return
-          if (phase !== 'peer-left' && phase !== 'error') {
-            if (reason === 'Room expired') {
-              setPhase('expired')
-            }
+          if (reason === 'Room expired') {
+            setPhase('expired')
           }
         }
 
         ws.onError = () => {
           if (cancelled) return
           setError('Connection failed')
+          setPhase('error')
+        }
+
+        ws.onReconnecting = () => {
+          if (cancelled) return
+          setMessages(prev => [...prev, buildTextMessage('system', 'Connection lost, reconnecting...')])
+        }
+
+        ws.onReconnected = () => {
+          if (cancelled) return
+          setMessages(prev => [...prev, buildTextMessage('system', 'Reconnected')])
+        }
+
+        ws.onReconnectFailed = () => {
+          if (cancelled) return
+          setMessages(prev => [...prev, buildTextMessage('system', 'Failed to reconnect')])
+          setError('Connection lost')
           setPhase('error')
         }
 
@@ -409,13 +483,19 @@ export function useChatAsCreator(
 
     async function handleCreatorMessage(msg: ServerMessage | ClientMessage, kp: CryptoKeyPair) {
       if (msg.type === 'peer-joined') {
-        setPhase('key-exchange')
+        setPhase(prev => {
+          if (prev === 'peer-disconnected') {
+            setMessages(p => [...p, buildTextMessage('system', 'Your partner reconnected')])
+            return 'ready'
+          }
+          return 'key-exchange'
+        })
         return
       }
 
       if (msg.type === 'peer-left') {
-        setMessages(prev => [...prev, buildTextMessage('system', 'Your partner left the chat')])
-        setPhase('peer-left')
+        setMessages(prev => [...prev, buildTextMessage('system', 'Your partner disconnected')])
+        setPhase('peer-disconnected')
         return
       }
 
@@ -443,6 +523,7 @@ export function useChatAsCreator(
           const sharedSecret = await deriveSharedSecret(kp.privateKey, remotePubKey)
           const rootKey = await hkdfDerive(sharedSecret, SALT, INFO, 32)
           ratchetRef.current = await initCreator(kp, rootKey)
+          setMediaKeyRaw(await deriveMediaKeyRaw(rootKey))
           setPhase('ready')
         } catch {
           setError('Key exchange failed')
@@ -468,29 +549,37 @@ export function useChatAsCreator(
           const parsed: unknown = JSON.parse(decoded)
           const result = DecryptedPayloadSchema.safeParse(parsed)
           if (!result.success) return
-          if (result.data.kind === 'text') {
-            const textPayload = z.object({
-              kind: z.literal('text'),
-              content: z.string(),
-            }).safeParse(result.data)
-            if (!textPayload.success) return
-            setMessages(prev => [
-              ...prev,
-              buildTextMessage('peer', textPayload.data.content, peerUsernameRef.current ?? undefined),
-            ])
-          } else if (result.data.kind === 'username-set') {
-            const nextPeerUsername = result.data.username.trim().slice(0, 24)
+          const data = result.data
+          if (data.kind === 'text') {
+            const id = data.msgId ?? generateMessageId()
+            const content = data.content
+            const replyToId = data.replyTo
+            setMessages(prev => {
+              const replyPreview = replyToId
+                ? findReplyPreview(prev, replyToId)
+                : undefined
+              return [...prev, {
+                ...buildTextMessage('peer', content, peerUsernameRef.current ?? undefined, id),
+                replyTo: replyToId,
+                replyPreview,
+              }]
+            })
+          } else if (data.kind === 'reaction') {
+            const { msgId, emoji, action } = data
+            setMessages(prev => applyReaction(prev, msgId, emoji, action, false))
+          } else if (data.kind === 'username-set') {
+            const nextPeerUsername = data.username.trim().slice(0, 24)
             if (!nextPeerUsername) return
             peerUsernameRef.current = nextPeerUsername
             setPeerUsername(nextPeerUsername)
           } else if (
-            result.data.kind === 'voice-note-meta' ||
-            result.data.kind === 'voice-note-chunk' ||
-            result.data.kind === 'voice-note-complete'
+            data.kind === 'voice-note-meta' ||
+            data.kind === 'voice-note-chunk' ||
+            data.kind === 'voice-note-complete'
           ) {
-            onVoiceNotePayload(result.data, 'peer')
+            onVoiceNotePayload(data, 'peer')
           } else {
-            voiceHandlerRef?.current?.(result.data)
+            voiceHandlerRef?.current?.(data)
           }
         } catch {
           // Decryption or parse failed — ignore
@@ -523,14 +612,16 @@ export function useChatAsCreator(
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const sendMessage = useCallback(async (text: string) => {
+  const sendMessage = useCallback(async (text: string, replyTo?: string) => {
     if (!ratchetRef.current || !wsRef.current) return
     const trimmed = text.slice(0, MAX_MESSAGE_LENGTH)
     if (!trimmed) return
 
-    const plaintext = new TextEncoder().encode(
-      JSON.stringify({ kind: 'text', content: trimmed }),
-    )
+    const msgId = generateMessageId()
+    const payloadObj: Record<string, unknown> = { kind: 'text', content: trimmed, msgId }
+    if (replyTo) payloadObj.replyTo = replyTo
+
+    const plaintext = new TextEncoder().encode(JSON.stringify(payloadObj))
     const { state: newState, header, iv, ciphertext } = await ratchetEncrypt(
       ratchetRef.current,
       plaintext,
@@ -540,9 +631,31 @@ export function useChatAsCreator(
     const payload = toBase64Url(concatBytes(iv, ciphertext))
     wsRef.current.send({ type: 'message', header, payload })
 
-    setMessages(prev => [...prev, {
-      ...buildTextMessage('self', trimmed, localUsernameRef.current ?? undefined),
-    }])
+    setMessages(prev => {
+      const replyPreview = replyTo ? findReplyPreview(prev, replyTo) : undefined
+      return [...prev, {
+        ...buildTextMessage('self', trimmed, localUsernameRef.current ?? undefined, msgId),
+        replyTo,
+        replyPreview,
+      }]
+    })
+  }, [])
+
+  const sendReaction = useCallback(async (msgId: string, emoji: string, action: 'add' | 'remove') => {
+    if (!ratchetRef.current || !wsRef.current) return
+    const plaintext = new TextEncoder().encode(
+      JSON.stringify({ kind: 'reaction', msgId, emoji, action }),
+    )
+    const { state: newState, header, iv, ciphertext } = await ratchetEncrypt(
+      ratchetRef.current,
+      plaintext,
+    )
+    ratchetRef.current = newState
+    const payload = toBase64Url(concatBytes(iv, ciphertext))
+    wsRef.current.send({ type: 'message', header, payload })
+
+    // Optimistic local update
+    setMessages(prev => applyReaction(prev, msgId, emoji, action, true))
   }, [])
 
   const sendVoiceSignal = useCallback(async (signal: VoiceSignal) => {
@@ -606,6 +719,7 @@ export function useChatAsCreator(
       objectUrl,
       durationMs,
       localUsernameRef.current ?? undefined,
+      noteId,
     )])
   }, [trackAudioUrl])
 
@@ -614,6 +728,7 @@ export function useChatAsCreator(
   }, [])
 
   const endChat = useCallback(() => {
+    wsRef.current?.cancelReconnect()
     cleanup()
     setPhase('peer-left')
     window.location.hash = ''
@@ -621,6 +736,7 @@ export function useChatAsCreator(
 
   const endChatForAll = useCallback(() => {
     if (wsRef.current) {
+      wsRef.current.cancelReconnect()
       try { wsRef.current.send({ type: 'close-room' }) } catch { /* ignore */ }
     }
     cleanup()
@@ -634,6 +750,7 @@ export function useChatAsCreator(
     peerTyping,
     inviteUrl,
     sendMessage,
+    sendReaction,
     sendTyping,
     sendVoiceSignal,
     sendVoiceNote,
@@ -645,6 +762,7 @@ export function useChatAsCreator(
     localUsername,
     peerUsername,
     setLocalUsername: setLocalUsernameAndNotify,
+    mediaKeyRaw,
     error,
   }
 }
@@ -661,11 +779,12 @@ export function useChatAsJoiner(
   const [error, setError] = useState<string | null>(null)
   const [localUsername, setLocalUsername] = useState<string | null>(null)
   const [peerUsername, setPeerUsername] = useState<string | null>(null)
+  const [mediaKeyRaw, setMediaKeyRaw] = useState<Uint8Array | null>(null)
   const [resolvedRoomSettings] = useState<RoomSettings>(
     normalizeRoomSettings(roomSettings ?? DEFAULT_ROOM_SETTINGS),
   )
 
-  const wsRef = useRef<ChatWebSocket | null>(null)
+  const wsRef = useRef<ReconnectingChatWebSocket | null>(null)
   const ratchetRef = useRef<RatchetState | null>(null)
   const localUsernameRef = useRef<string | null>(null)
   const peerUsernameRef = useRef<string | null>(null)
@@ -767,6 +886,7 @@ export function useChatAsJoiner(
       objectUrl,
       assembly.durationMs,
       sender === 'peer' ? peerUsernameRef.current ?? undefined : localUsernameRef.current ?? undefined,
+      payload.noteId,
     )])
     voiceNoteAssembliesRef.current.delete(payload.noteId)
   }, [cleanupVoiceNoteAssemblies, trackAudioUrl])
@@ -790,6 +910,7 @@ export function useChatAsJoiner(
     if (wsRef.current) {
       const ws = wsRef.current
       wsRef.current = null
+      ws.cancelReconnect()
       try { ws.send({ type: 'leave' }) } catch { /* ignore */ }
       setTimeout(() => ws.close(), 100)
     }
@@ -813,11 +934,12 @@ export function useChatAsJoiner(
         const sharedSecret = await deriveSharedSecret(kp.privateKey, creatorPubKey)
         const rootKey = await hkdfDerive(sharedSecret, SALT, INFO, 32)
         ratchetRef.current = await initJoiner(kp, creatorPubKey, rootKey)
+        setMediaKeyRaw(await deriveMediaKeyRaw(rootKey))
 
         if (cancelled) return
 
         // Connect WebSocket
-        const ws = createWebSocket()
+        const ws = createReconnectingWebSocket()
         wsRef.current = ws
 
         ws.onOpen = async () => {
@@ -846,6 +968,23 @@ export function useChatAsJoiner(
           setPhase('error')
         }
 
+        ws.onReconnecting = () => {
+          if (cancelled) return
+          setMessages(prev => [...prev, buildTextMessage('system', 'Connection lost, reconnecting...')])
+        }
+
+        ws.onReconnected = () => {
+          if (cancelled) return
+          setMessages(prev => [...prev, buildTextMessage('system', 'Reconnected')])
+        }
+
+        ws.onReconnectFailed = () => {
+          if (cancelled) return
+          setMessages(prev => [...prev, buildTextMessage('system', 'Failed to reconnect')])
+          setError('Connection lost')
+          setPhase('error')
+        }
+
         ws.connect(buildWsUrl(roomId))
       } catch (err) {
         if (cancelled) return
@@ -855,9 +994,20 @@ export function useChatAsJoiner(
     }
 
     async function handleJoinerMessage(msg: ServerMessage | ClientMessage) {
+      if (msg.type === 'peer-joined') {
+        setPhase(prev => {
+          if (prev === 'peer-disconnected') {
+            setMessages(p => [...p, buildTextMessage('system', 'Your partner reconnected')])
+            return 'ready'
+          }
+          return prev
+        })
+        return
+      }
+
       if (msg.type === 'peer-left') {
-        setMessages(prev => [...prev, buildTextMessage('system', 'Your partner left the chat')])
-        setPhase('peer-left')
+        setMessages(prev => [...prev, buildTextMessage('system', 'Your partner disconnected')])
+        setPhase('peer-disconnected')
         return
       }
 
@@ -900,29 +1050,37 @@ export function useChatAsJoiner(
           const parsed: unknown = JSON.parse(decoded)
           const result = DecryptedPayloadSchema.safeParse(parsed)
           if (!result.success) return
-          if (result.data.kind === 'text') {
-            const textPayload = z.object({
-              kind: z.literal('text'),
-              content: z.string(),
-            }).safeParse(result.data)
-            if (!textPayload.success) return
-            setMessages(prev => [
-              ...prev,
-              buildTextMessage('peer', textPayload.data.content, peerUsernameRef.current ?? undefined),
-            ])
-          } else if (result.data.kind === 'username-set') {
-            const nextPeerUsername = result.data.username.trim().slice(0, 24)
+          const data = result.data
+          if (data.kind === 'text') {
+            const id = data.msgId ?? generateMessageId()
+            const content = data.content
+            const replyToId = data.replyTo
+            setMessages(prev => {
+              const replyPreview = replyToId
+                ? findReplyPreview(prev, replyToId)
+                : undefined
+              return [...prev, {
+                ...buildTextMessage('peer', content, peerUsernameRef.current ?? undefined, id),
+                replyTo: replyToId,
+                replyPreview,
+              }]
+            })
+          } else if (data.kind === 'reaction') {
+            const { msgId, emoji, action } = data
+            setMessages(prev => applyReaction(prev, msgId, emoji, action, false))
+          } else if (data.kind === 'username-set') {
+            const nextPeerUsername = data.username.trim().slice(0, 24)
             if (!nextPeerUsername) return
             peerUsernameRef.current = nextPeerUsername
             setPeerUsername(nextPeerUsername)
           } else if (
-            result.data.kind === 'voice-note-meta' ||
-            result.data.kind === 'voice-note-chunk' ||
-            result.data.kind === 'voice-note-complete'
+            data.kind === 'voice-note-meta' ||
+            data.kind === 'voice-note-chunk' ||
+            data.kind === 'voice-note-complete'
           ) {
-            onVoiceNotePayload(result.data, 'peer')
+            onVoiceNotePayload(data, 'peer')
           } else {
-            voiceHandlerRef?.current?.(result.data)
+            voiceHandlerRef?.current?.(data)
           }
         } catch {
           // Decryption or parse failed — ignore
@@ -955,14 +1113,16 @@ export function useChatAsJoiner(
     }
   }, [roomId, creatorPubKeyB64]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const sendMessage = useCallback(async (text: string) => {
+  const sendMessage = useCallback(async (text: string, replyTo?: string) => {
     if (!ratchetRef.current || !wsRef.current) return
     const trimmed = text.slice(0, MAX_MESSAGE_LENGTH)
     if (!trimmed) return
 
-    const plaintext = new TextEncoder().encode(
-      JSON.stringify({ kind: 'text', content: trimmed }),
-    )
+    const msgId = generateMessageId()
+    const payloadObj: Record<string, unknown> = { kind: 'text', content: trimmed, msgId }
+    if (replyTo) payloadObj.replyTo = replyTo
+
+    const plaintext = new TextEncoder().encode(JSON.stringify(payloadObj))
     const { state: newState, header, iv, ciphertext } = await ratchetEncrypt(
       ratchetRef.current,
       plaintext,
@@ -972,9 +1132,31 @@ export function useChatAsJoiner(
     const payload = toBase64Url(concatBytes(iv, ciphertext))
     wsRef.current.send({ type: 'message', header, payload })
 
-    setMessages(prev => [...prev, {
-      ...buildTextMessage('self', trimmed, localUsernameRef.current ?? undefined),
-    }])
+    setMessages(prev => {
+      const replyPreview = replyTo ? findReplyPreview(prev, replyTo) : undefined
+      return [...prev, {
+        ...buildTextMessage('self', trimmed, localUsernameRef.current ?? undefined, msgId),
+        replyTo,
+        replyPreview,
+      }]
+    })
+  }, [])
+
+  const sendReaction = useCallback(async (msgId: string, emoji: string, action: 'add' | 'remove') => {
+    if (!ratchetRef.current || !wsRef.current) return
+    const plaintext = new TextEncoder().encode(
+      JSON.stringify({ kind: 'reaction', msgId, emoji, action }),
+    )
+    const { state: newState, header, iv, ciphertext } = await ratchetEncrypt(
+      ratchetRef.current,
+      plaintext,
+    )
+    ratchetRef.current = newState
+    const payload = toBase64Url(concatBytes(iv, ciphertext))
+    wsRef.current.send({ type: 'message', header, payload })
+
+    // Optimistic local update
+    setMessages(prev => applyReaction(prev, msgId, emoji, action, true))
   }, [])
 
   const sendVoiceSignal = useCallback(async (signal: VoiceSignal) => {
@@ -1038,6 +1220,7 @@ export function useChatAsJoiner(
       objectUrl,
       durationMs,
       localUsernameRef.current ?? undefined,
+      noteId,
     )])
   }, [trackAudioUrl])
 
@@ -1046,6 +1229,7 @@ export function useChatAsJoiner(
   }, [])
 
   const endChat = useCallback(() => {
+    wsRef.current?.cancelReconnect()
     cleanup()
     setPhase('peer-left')
     window.location.hash = ''
@@ -1053,6 +1237,7 @@ export function useChatAsJoiner(
 
   const endChatForAll = useCallback(() => {
     if (wsRef.current) {
+      wsRef.current.cancelReconnect()
       try { wsRef.current.send({ type: 'close-room' }) } catch { /* ignore */ }
     }
     cleanup()
@@ -1066,6 +1251,7 @@ export function useChatAsJoiner(
     peerTyping,
     inviteUrl: null,
     sendMessage,
+    sendReaction,
     sendTyping,
     sendVoiceSignal,
     sendVoiceNote,
@@ -1076,6 +1262,7 @@ export function useChatAsJoiner(
     localUsername,
     peerUsername,
     setLocalUsername: setLocalUsernameAndNotify,
+    mediaKeyRaw,
     error,
   }
 }

@@ -13,23 +13,23 @@ export function Layout({ children }: LayoutProps) {
   return (
     <div className={styles.container}>
       <header className={styles.header}>
-        <a href='/' className={styles.logo}>
-          yapgone
-        </a>
+        <div className={styles.headerLeft}>
+          <a href='/' className={styles.logo}>
+            yapgone
+          </a>
+          <span className={styles.tagline}>
+            speak freely, then let it be gone
+          </span>
+        </div>
         <button
           className={styles.themeToggle}
           onClick={toggleTheme}
           aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
         >
-          {theme === 'dark' ? <IconSun size={16} /> : <IconMoon size={16} />}
+          {theme === 'dark' ? <IconSun size={24} /> : <IconMoon size={24} />}
         </button>
       </header>
       <main className={styles.main}>{children}</main>
-      <footer className={styles.footer}>
-        <span className={styles.tagline}>
-          speak freely, then let it be gone
-        </span>
-      </footer>
     </div>
   );
 }

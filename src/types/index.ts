@@ -27,6 +27,8 @@ export type VoiceSignal =
   | { kind: 'sdp-answer'; sdp: string }
   | { kind: 'ice-candidate'; candidate: string }
   | { kind: 'voice-end' }
+  | { kind: 'screen-share-start' }
+  | { kind: 'screen-share-stop' }
 
 export type CallState =
   | 'idle'

@@ -21,12 +21,27 @@
   font-size: 0.95rem;
 }
 
+.inviteRow {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  max-width: 100%;
+}
+
+@media (max-width: 520px) {
+  .inviteRow {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+}
+
 .inviteSection {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 0.75rem;
-  max-width: 100%;
+  min-width: 0;
+  flex: 1;
 }
 
 .inviteLabel {
@@ -106,8 +121,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 1.75rem;
+  height: 1.75rem;
   border-radius: var(--radius-sm);
   background: rgba(var(--fg), 0.06);
   border: 1px solid rgba(var(--fg), 0.08);
@@ -166,25 +181,17 @@
   border-bottom: 1px solid var(--border);
 }
 
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
 .endButtons {
   display: flex;
   gap: 0.4rem;
 }
 
-.endButton {
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  padding: 0.3rem 0.75rem;
-  font-size: 0.8rem;
-  transition: color 0.15s, border-color 0.15s;
-}
-
-.endButton:hover {
-  color: var(--error);
-  border-color: var(--error);
-}
 
 .confirmBar {
   display: flex;
@@ -197,35 +204,6 @@
   font-size: 0.8rem;
 }
 
-.confirmYes {
-  background: none;
-  border: 1px solid var(--error);
-  border-radius: var(--radius-sm);
-  color: var(--error);
-  padding: 0.3rem 0.75rem;
-  font-size: 0.8rem;
-  transition: background 0.15s;
-}
-
-.confirmYes:hover {
-  background: var(--error);
-  color: var(--bg);
-}
-
-.confirmCancel {
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  padding: 0.3rem 0.75rem;
-  font-size: 0.8rem;
-  transition: color 0.15s, border-color 0.15s;
-}
-
-.confirmCancel:hover {
-  color: var(--text-primary);
-  border-color: var(--text-secondary);
-}
 
 .messageList {
   display: flex;
@@ -233,6 +211,7 @@
   gap: 0.5rem;
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 0.75rem 0;
   min-height: 0;
 }
@@ -274,8 +253,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 1.75rem;
+  height: 1.75rem;
   background: rgba(var(--fg), 0.04);
   border: 1px solid rgba(var(--fg), 0.08);
   border-radius: var(--radius-sm);
@@ -459,6 +438,36 @@
 }
 
 
+.messageList {
+  position: relative;
+}
+
+.newMessagesPill {
+  position: sticky;
+  bottom: 0;
+  align-self: center;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 0.35rem 0.9rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  animation: pillIn 0.2s ease-out;
+  z-index: 5;
+}
+
+.newMessagesPill:hover {
+  opacity: 0.9;
+}
+
+@keyframes pillIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 @keyframes typingPulse {
   0%, 60%, 100% {
     opacity: 0.4;
@@ -469,3 +478,72 @@
     transform: scale(1);
   }
 }
+
+/* Header actions wrapper */
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+/* Local settings gear + dropdown */
+.localSettingsWrapper {
+  position: relative;
+}
+
+.localGearButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  background: rgba(var(--fg), 0.04);
+  border: 1px solid rgba(var(--fg), 0.08);
+  border-radius: var(--radius-sm);
+  color: rgba(var(--fg), 0.3);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.localGearButton:hover {
+  color: rgba(var(--fg), 0.55);
+  background: rgba(var(--fg), 0.07);
+  border-color: rgba(var(--fg), 0.12);
+}
+
+.localSettingsDropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 200px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.6rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  z-index: 20;
+  animation: dropdownIn 0.12s ease-out;
+}
+
+@keyframes dropdownIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Reconnecting indicator */
+.reconnectingIndicator {
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--text-tertiary);
+  padding: 0.4rem 0;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+

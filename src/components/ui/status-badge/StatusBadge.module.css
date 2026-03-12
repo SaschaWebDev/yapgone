@@ -26,3 +26,28 @@
 .label {
   white-space: nowrap;
 }
+
+.quality {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.3rem;
+}
+
+.reconnecting {
+  color: var(--warning);
+  animation: qualityPulse 2s ease-in-out infinite;
+}
+
+.degraded {
+  color: var(--warning);
+  opacity: 0.7;
+}
+
+.lost {
+  color: var(--error);
+}
+
+@keyframes qualityPulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
