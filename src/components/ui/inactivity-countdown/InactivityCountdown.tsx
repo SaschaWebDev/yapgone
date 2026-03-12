@@ -1,30 +1,26 @@
+import { createPortal } from 'react-dom'
 import styles from './InactivityCountdown.module.css'
 
 interface InactivityCountdownProps {
   remainingSeconds: number
-  warningThresholdSeconds: number
-  urgentThresholdSeconds: number
+  showThresholdSeconds?: number
 }
 
 export function InactivityCountdown({
   remainingSeconds,
-  warningThresholdSeconds,
-  urgentThresholdSeconds,
+  showThresholdSeconds = 60,
 }: InactivityCountdownProps) {
-  const minutes = Math.floor(remainingSeconds / 60)
-  const seconds = remainingSeconds % 60
-  const display = `${minutes}:${String(seconds).padStart(2, '0')}`
+  if (remainingSeconds > showThresholdSeconds) return null
 
-  let className = styles.countdown
-  if (remainingSeconds <= urgentThresholdSeconds) {
-    className += ` ${styles.urgent}`
-  } else if (remainingSeconds <= warningThresholdSeconds) {
-    className += ` ${styles.warning}`
-  }
+  const timerClass = remainingSeconds <= 10
+    ? `${styles.timer} ${styles.timerPulse}`
+    : styles.timer
 
-  return (
-    <span className={className} aria-label={`Room expires in ${display}`}>
-      {display}
-    </span>
+  return createPortal(
+    <div className={styles.overlay} aria-label={`Session expiring in ${remainingSeconds} seconds`}>
+      <span className={timerClass}>{remainingSeconds}</span>
+      <span className={styles.label}>Session expiring</span>
+    </div>,
+    document.body,
   )
 }

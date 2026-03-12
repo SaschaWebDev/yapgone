@@ -41,8 +41,6 @@ import {
   SAFE_WORD_MAX_ATTEMPTS,
   USERNAME_MAX_LENGTH,
   ROOM_INACTIVITY_TTL_MS,
-  INACTIVITY_WARNING_THRESHOLD_S,
-  INACTIVITY_URGENT_THRESHOLD_S,
 } from '@/constants';
 import styles from './Chat.module.css';
 
@@ -1164,14 +1162,10 @@ function ChatView({
   // phase === 'ready' or 'peer-disconnected'
   return (
     <div className={styles.wrapper}>
+      <InactivityCountdown remainingSeconds={remainingSeconds} />
       <div className={styles.chatHeader}>
         <div className={styles.headerLeft}>
           <StatusBadge phase={isReady ? 'ready' : 'peer-disconnected'} connectionQuality={connectionQuality} />
-          <InactivityCountdown
-            remainingSeconds={remainingSeconds}
-            warningThresholdSeconds={INACTIVITY_WARNING_THRESHOLD_S}
-            urgentThresholdSeconds={INACTIVITY_URGENT_THRESHOLD_S}
-          />
         </div>
         <div className={styles.headerActions}>
           {showEndForMeOptions ? (
