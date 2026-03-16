@@ -1,41 +1,55 @@
-import { useState, useEffect, useRef } from 'react'
-import type { CallState } from '@/types'
-import { Button } from '../button'
-import { IconPhone, IconMic, IconMicOff, IconScreenShare, IconScreenShareOff, IconSpeaker, IconSpeakerOff, IconLock, IconLockOpen } from '../icons'
-import styles from './VoiceControls.module.css'
+import { useState, useEffect, useRef } from 'react';
+import type { CallState } from '@/types';
+import { Button } from '../button';
+import {
+  IconPhone,
+  IconMic,
+  IconMicOff,
+  IconScreenShare,
+  IconScreenShareOff,
+  IconSpeaker,
+  IconSpeakerOff,
+  IconLock,
+  IconLockOpen,
+} from '../icons';
+import styles from './VoiceControls.module.css';
 
-type PrivacyAction = 'start' | 'accept'
+type PrivacyAction = 'start' | 'accept';
 
 export function _requiresPrivacyGate(privacyAcknowledged: boolean): boolean {
-  return !privacyAcknowledged
+  return !privacyAcknowledged;
 }
 
 interface VoiceControlsProps {
-  callState: CallState
-  isMuted: boolean
-  callDuration: number
-  privacyAcknowledged: boolean
-  isScreenSharing: boolean
-  isDeafened: boolean
-  isE2eeEnabled: boolean
-  isReconnecting: boolean
-  onStartCall: () => void
-  onAcceptCall: () => void
-  onDeclineCall: () => void
-  onEndCall: () => void
-  onToggleMute: () => void
-  onToggleDeafen: () => void
-  onToggleE2ee: () => void
-  onAcknowledgePrivacy: () => void
-  onResetCallState: () => void
-  onStartScreenShare: () => void
-  onStopScreenShare: () => void
+  callState: CallState;
+  isMuted: boolean;
+  callDuration: number;
+  privacyAcknowledged: boolean;
+  isScreenSharing: boolean;
+  isDeafened: boolean;
+  isE2eeEnabled: boolean;
+  isReconnecting: boolean;
+  e2eeDowngradeRequested: boolean;
+  e2eeDowngradeIncoming: boolean;
+  onStartCall: () => void;
+  onAcceptCall: () => void;
+  onDeclineCall: () => void;
+  onEndCall: () => void;
+  onToggleMute: () => void;
+  onToggleDeafen: () => void;
+  onToggleE2ee: () => void;
+  onAcknowledgePrivacy: () => void;
+  onResetCallState: () => void;
+  onStartScreenShare: () => void;
+  onStopScreenShare: () => void;
+  onAcceptE2eeDowngrade: () => void;
+  onDeclineE2eeDowngrade: () => void;
 }
 
 function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60)
-  const s = seconds % 60
-  return `${m}:${s.toString().padStart(2, '0')}`
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
 export function VoiceControls({
@@ -47,6 +61,8 @@ export function VoiceControls({
   isDeafened,
   isE2eeEnabled,
   isReconnecting,
+  e2eeDowngradeRequested,
+  e2eeDowngradeIncoming,
   onStartCall,
   onAcceptCall,
   onDeclineCall,
@@ -58,189 +74,206 @@ export function VoiceControls({
   onResetCallState,
   onStartScreenShare,
   onStopScreenShare,
+  onAcceptE2eeDowngrade,
+  onDeclineE2eeDowngrade,
 }: VoiceControlsProps) {
-  const [showPrivacyNotice, setShowPrivacyNotice] = useState(false)
-  const [pendingPrivacyAction, setPendingPrivacyAction] = useState<PrivacyAction | null>(null)
-  const [ringtoneBlocked, setRingtoneBlocked] = useState(false)
-  const ringtoneRef = useRef<HTMLAudioElement | null>(null)
-  const [dialtoneBlocked, setDialtoneBlocked] = useState(false)
-  const dialtoneRef = useRef<HTMLAudioElement | null>(null)
-  const declineSfxRef = useRef<HTMLAudioElement | null>(null)
-  const prevCallStateRef = useRef<CallState>(callState)
+  const [showPrivacyNotice, setShowPrivacyNotice] = useState(false);
+  const [pendingPrivacyAction, setPendingPrivacyAction] =
+    useState<PrivacyAction | null>(null);
+  const [ringtoneBlocked, setRingtoneBlocked] = useState(false);
+  const ringtoneRef = useRef<HTMLAudioElement | null>(null);
+  const [dialtoneBlocked, setDialtoneBlocked] = useState(false);
+  const dialtoneRef = useRef<HTMLAudioElement | null>(null);
+  const declineSfxRef = useRef<HTMLAudioElement | null>(null);
+  const prevCallStateRef = useRef<CallState>(callState);
 
   useEffect(() => {
-    const ringtone = new Audio('/yapgone-ringtone.mp3')
-    ringtone.loop = true
-    ringtone.preload = 'auto'
-    ringtoneRef.current = ringtone
+    const ringtone = new Audio('/yapgone-ringtone.mp3');
+    ringtone.loop = true;
+    ringtone.preload = 'auto';
+    ringtoneRef.current = ringtone;
 
     return () => {
       if (ringtoneRef.current) {
-        ringtoneRef.current.pause()
-        ringtoneRef.current.currentTime = 0
+        ringtoneRef.current.pause();
+        ringtoneRef.current.currentTime = 0;
       }
-      ringtoneRef.current = null
-    }
-  }, [])
+      ringtoneRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
-    const dialtone = new Audio('/yapgone-dialtone.mp3')
-    dialtone.loop = true
-    dialtone.preload = 'auto'
-    dialtoneRef.current = dialtone
+    const dialtone = new Audio('/yapgone-dialtone.mp3');
+    dialtone.loop = true;
+    dialtone.preload = 'auto';
+    dialtoneRef.current = dialtone;
 
     return () => {
       if (dialtoneRef.current) {
-        dialtoneRef.current.pause()
-        dialtoneRef.current.currentTime = 0
+        dialtoneRef.current.pause();
+        dialtoneRef.current.currentTime = 0;
       }
-      dialtoneRef.current = null
-    }
-  }, [])
+      dialtoneRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
-    const sfx = new Audio('/yapgone-call-declined.mp3')
-    sfx.preload = 'auto'
-    declineSfxRef.current = sfx
+    const sfx = new Audio('/yapgone-call-declined.mp3');
+    sfx.preload = 'auto';
+    declineSfxRef.current = sfx;
 
     return () => {
-      declineSfxRef.current = null
-    }
-  }, [])
+      declineSfxRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
-    const prev = prevCallStateRef.current
-    prevCallStateRef.current = callState
+    const prev = prevCallStateRef.current;
+    prevCallStateRef.current = callState;
 
     if (prev === 'requesting' && callState === 'ended') {
-      void declineSfxRef.current?.play().catch(() => { /* autoplay blocked */ })
+      void declineSfxRef.current?.play().catch(() => {
+        /* autoplay blocked */
+      });
     }
-  }, [callState])
+  }, [callState]);
 
   useEffect(() => {
-    const ringtone = ringtoneRef.current
-    if (!ringtone) return
+    const ringtone = ringtoneRef.current;
+    if (!ringtone) return;
 
     if (callState === 'ringing') {
-      ringtone.currentTime = 0
-      void ringtone.play()
+      ringtone.currentTime = 0;
+      void ringtone
+        .play()
         .then(() => {
-          setRingtoneBlocked(false)
+          setRingtoneBlocked(false);
         })
         .catch(() => {
           // Browser may block autoplay until user interaction.
-          setRingtoneBlocked(true)
-        })
-      return
+          setRingtoneBlocked(true);
+        });
+      return;
     }
 
-    ringtone.pause()
-    ringtone.currentTime = 0
-    setRingtoneBlocked(false)
-  }, [callState])
+    ringtone.pause();
+    ringtone.currentTime = 0;
+    setRingtoneBlocked(false);
+  }, [callState]);
 
   useEffect(() => {
-    const dialtone = dialtoneRef.current
-    if (!dialtone) return
+    const dialtone = dialtoneRef.current;
+    if (!dialtone) return;
 
     if (callState === 'requesting') {
-      dialtone.currentTime = 0
-      void dialtone.play()
-        .then(() => { setDialtoneBlocked(false) })
-        .catch(() => { setDialtoneBlocked(true) })
-      return
+      dialtone.currentTime = 0;
+      void dialtone
+        .play()
+        .then(() => {
+          setDialtoneBlocked(false);
+        })
+        .catch(() => {
+          setDialtoneBlocked(true);
+        });
+      return;
     }
 
-    dialtone.pause()
-    dialtone.currentTime = 0
-    setDialtoneBlocked(false)
-  }, [callState])
+    dialtone.pause();
+    dialtone.currentTime = 0;
+    setDialtoneBlocked(false);
+  }, [callState]);
 
   const handleEnableRingtone = () => {
-    const ringtone = ringtoneRef.current
-    if (!ringtone) return
-    ringtone.currentTime = 0
-    void ringtone.play()
+    const ringtone = ringtoneRef.current;
+    if (!ringtone) return;
+    ringtone.currentTime = 0;
+    void ringtone
+      .play()
       .then(() => {
-        setRingtoneBlocked(false)
+        setRingtoneBlocked(false);
       })
       .catch(() => {
-        setRingtoneBlocked(true)
-      })
-  }
+        setRingtoneBlocked(true);
+      });
+  };
 
   const handleEnableDialtone = () => {
-    const dialtone = dialtoneRef.current
-    if (!dialtone) return
-    dialtone.currentTime = 0
-    void dialtone.play()
-      .then(() => { setDialtoneBlocked(false) })
-      .catch(() => { setDialtoneBlocked(true) })
-  }
+    const dialtone = dialtoneRef.current;
+    if (!dialtone) return;
+    dialtone.currentTime = 0;
+    void dialtone
+      .play()
+      .then(() => {
+        setDialtoneBlocked(false);
+      })
+      .catch(() => {
+        setDialtoneBlocked(true);
+      });
+  };
 
   // Auto-reset ended/failed state after a brief display
   useEffect(() => {
     if (callState === 'ended' || callState === 'failed') {
-      const timer = setTimeout(onResetCallState, 3000)
-      return () => clearTimeout(timer)
+      const timer = setTimeout(onResetCallState, 3000);
+      return () => clearTimeout(timer);
     }
-  }, [callState, onResetCallState])
+  }, [callState, onResetCallState]);
 
   const runPrivacyAction = (action: PrivacyAction) => {
     if (action === 'start') {
-      onStartCall()
-      return
+      onStartCall();
+      return;
     }
-    onAcceptCall()
-  }
+    onAcceptCall();
+  };
 
   const handleStartCallClick = () => {
     if (_requiresPrivacyGate(privacyAcknowledged)) {
-      setShowPrivacyNotice(true)
-      setPendingPrivacyAction('start')
-      return
+      setShowPrivacyNotice(true);
+      setPendingPrivacyAction('start');
+      return;
     }
-    onStartCall()
-  }
+    onStartCall();
+  };
 
   const handleAcceptCallClick = () => {
     if (_requiresPrivacyGate(privacyAcknowledged)) {
-      setShowPrivacyNotice(true)
-      setPendingPrivacyAction('accept')
-      return
+      setShowPrivacyNotice(true);
+      setPendingPrivacyAction('accept');
+      return;
     }
-    onAcceptCall()
-  }
+    onAcceptCall();
+  };
 
   const handlePrivacyAccept = () => {
-    const action = pendingPrivacyAction
-    setShowPrivacyNotice(false)
-    setPendingPrivacyAction(null)
-    onAcknowledgePrivacy()
+    const action = pendingPrivacyAction;
+    setShowPrivacyNotice(false);
+    setPendingPrivacyAction(null);
+    onAcknowledgePrivacy();
     if (action) {
-      runPrivacyAction(action)
+      runPrivacyAction(action);
     }
-  }
+  };
 
   const handlePrivacyCancel = () => {
-    setShowPrivacyNotice(false)
-    setPendingPrivacyAction(null)
-  }
+    setShowPrivacyNotice(false);
+    setPendingPrivacyAction(null);
+  };
 
   useEffect(() => {
     if (pendingPrivacyAction === 'accept' && callState !== 'ringing') {
-      setShowPrivacyNotice(false)
-      setPendingPrivacyAction(null)
+      setShowPrivacyNotice(false);
+      setPendingPrivacyAction(null);
     }
-  }, [pendingPrivacyAction, callState])
+  }, [pendingPrivacyAction, callState]);
 
   if (showPrivacyNotice) {
     return (
       <div className={styles.privacyNotice}>
         <p className={styles.privacyText}>
-          Voice calls connect directly between you and your partner (peer-to-peer).
-          This applies whether you start or accept a call. Your IP address will be
-          visible to them. Use a VPN if this concerns you.
+          Voice calls connect directly between you and your partner
+          (peer-to-peer). This applies whether you start or accept a call. Your
+          IP address will be visible to them. Use a VPN if this concerns you.
         </p>
         <div className={styles.privacyActions}>
           <Button intent='neutral' size='sm' onClick={handlePrivacyCancel}>
@@ -251,7 +284,7 @@ export function VoiceControls({
           </Button>
         </div>
       </div>
-    )
+    );
   }
 
   if (callState === 'idle') {
@@ -260,14 +293,14 @@ export function VoiceControls({
         <button
           className={styles.callButton}
           onClick={handleStartCallClick}
-          title="Start voice call"
-          aria-label="Start voice call"
+          title='Start voice call'
+          aria-label='Start voice call'
         >
           <IconPhone size={21} />
           <span className={styles.callLabel}>Voice Call</span>
         </button>
       </div>
-    )
+    );
   }
 
   if (callState === 'requesting') {
@@ -279,8 +312,8 @@ export function VoiceControls({
             <button
               className={styles.enableDialtoneButton}
               onClick={handleEnableDialtone}
-              title="Enable dialtone"
-              aria-label="Enable dialtone"
+              title='Enable dialtone'
+              aria-label='Enable dialtone'
             >
               Enable dialtone
             </button>
@@ -290,7 +323,7 @@ export function VoiceControls({
           </Button>
         </div>
       </div>
-    )
+    );
   }
 
   if (callState === 'ringing') {
@@ -298,14 +331,14 @@ export function VoiceControls({
       <div className={styles.wrapper}>
         <div className={`${styles.banner} ${styles.incomingBanner}`}>
           <span className={`${styles.bannerText} ${styles.incomingText}`}>
-            Incoming voice call. Choose Accept or Decline.
+            Incoming voice call
           </span>
           {ringtoneBlocked && (
             <button
               className={styles.enableRingtoneButton}
               onClick={handleEnableRingtone}
-              title="Enable ringtone"
-              aria-label="Enable ringtone"
+              title='Enable ringtone'
+              aria-label='Enable ringtone'
             >
               Enable ringtone
             </button>
@@ -313,22 +346,22 @@ export function VoiceControls({
           <button
             className={styles.acceptButton}
             onClick={handleAcceptCallClick}
-            title="Accept call"
-            aria-label="Accept call"
+            title='Accept call'
+            aria-label='Accept call'
           >
             <IconPhone size={21} />
           </button>
           <button
             className={styles.declineButton}
             onClick={onDeclineCall}
-            title="Decline call"
-            aria-label="Decline call"
+            title='Decline call'
+            aria-label='Decline call'
           >
             <IconPhone size={21} style={{ transform: 'rotate(135deg)' }} />
           </button>
         </div>
       </div>
-    )
+    );
   }
 
   if (callState === 'connecting') {
@@ -341,7 +374,7 @@ export function VoiceControls({
           </Button>
         </div>
       </div>
-    )
+    );
   }
 
   if (callState === 'active') {
@@ -349,7 +382,31 @@ export function VoiceControls({
       <div className={styles.wrapper}>
         <div className={styles.activeDot} />
         <span className={styles.duration}>{formatDuration(callDuration)}</span>
-        {isReconnecting && <span className={styles.reconnectingText}>Switching...</span>}
+        {isReconnecting && (
+          <span className={styles.reconnectingText}>Switching...</span>
+        )}
+        {e2eeDowngradeRequested && (
+          <span className={styles.e2eeRequestingText}>Requesting...</span>
+        )}
+        {e2eeDowngradeIncoming && (
+          <div className={`${styles.banner} ${styles.e2eeDowngradeBanner}`}>
+            <span
+              className={`${styles.bannerText} ${styles.e2eeDowngradeText}`}
+            >
+              Partner wants to disable encryption
+            </span>
+            <Button intent='neutral' size='sm' onClick={onDeclineE2eeDowngrade}>
+              Cancel
+            </Button>
+            <Button
+              intent='positive'
+              size='sm'
+              onClick={onAcceptE2eeDowngrade}
+            >
+              OK, I understand
+            </Button>
+          </div>
+        )}
         <div className={styles.banner} />
         <button
           className={isMuted ? styles.mutedButton : styles.muteButton}
@@ -365,39 +422,57 @@ export function VoiceControls({
           title={isDeafened ? 'Undeafen' : 'Deafen'}
           aria-label={isDeafened ? 'Undeafen audio' : 'Deafen audio'}
         >
-          {isDeafened ? <IconSpeakerOff size={21} /> : <IconSpeaker size={21} />}
+          {isDeafened ? (
+            <IconSpeakerOff size={21} />
+          ) : (
+            <IconSpeaker size={21} />
+          )}
         </button>
         {typeof navigator !== 'undefined' &&
           navigator.mediaDevices &&
           typeof navigator.mediaDevices.getDisplayMedia === 'function' && (
-          <button
-            className={isScreenSharing ? styles.screenShareActiveButton : styles.screenShareButton}
-            onClick={isScreenSharing ? onStopScreenShare : onStartScreenShare}
-            title={isScreenSharing ? 'Stop sharing screen' : 'Share screen'}
-            aria-label={isScreenSharing ? 'Stop sharing screen' : 'Share screen'}
-          >
-            {isScreenSharing ? <IconScreenShareOff size={21} /> : <IconScreenShare size={21} />}
-          </button>
-        )}
+            <button
+              className={
+                isScreenSharing
+                  ? styles.screenShareActiveButton
+                  : styles.screenShareButton
+              }
+              onClick={isScreenSharing ? onStopScreenShare : onStartScreenShare}
+              title={isScreenSharing ? 'Stop sharing screen' : 'Share screen'}
+              aria-label={
+                isScreenSharing ? 'Stop sharing screen' : 'Share screen'
+              }
+            >
+              {isScreenSharing ? (
+                <IconScreenShareOff size={21} />
+              ) : (
+                <IconScreenShare size={21} />
+              )}
+            </button>
+          )}
         <button
           className={isE2eeEnabled ? styles.e2eeOnButton : styles.e2eeOffButton}
           onClick={onToggleE2ee}
-          disabled={isReconnecting}
+          disabled={isReconnecting || e2eeDowngradeRequested}
           title={isE2eeEnabled ? 'Disable encryption' : 'Enable encryption'}
-          aria-label={isE2eeEnabled ? 'Disable voice encryption' : 'Enable voice encryption'}
+          aria-label={
+            isE2eeEnabled
+              ? 'Disable voice encryption'
+              : 'Enable voice encryption'
+          }
         >
           {isE2eeEnabled ? <IconLock size={21} /> : <IconLockOpen size={21} />}
         </button>
         <button
           className={styles.endCallButton}
           onClick={onEndCall}
-          title="End call"
-          aria-label="End call"
+          title='End call'
+          aria-label='End call'
         >
           <IconPhone size={21} style={{ transform: 'rotate(135deg)' }} />
         </button>
       </div>
-    )
+    );
   }
 
   if (callState === 'ended') {
@@ -405,7 +480,7 @@ export function VoiceControls({
       <div className={styles.wrapper}>
         <span className={styles.endedText}>Call ended</span>
       </div>
-    )
+    );
   }
 
   if (callState === 'failed') {
@@ -416,8 +491,8 @@ export function VoiceControls({
           Dismiss
         </Button>
       </div>
-    )
+    );
   }
 
-  return null
+  return null;
 }

@@ -199,6 +199,29 @@
   white-space: nowrap;
 }
 
+.e2eeRequestingText {
+  font-size: 0.72rem;
+  font-style: italic;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.e2eeDowngradeBanner {
+  padding: 0.35rem 0.45rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 191, 0, 0.35);
+  background: linear-gradient(
+    90deg,
+    rgba(255, 191, 0, 0.12),
+    rgba(255, 191, 0, 0.06)
+  );
+}
+
+.e2eeDowngradeText {
+  color: #d4a017;
+  font-weight: 600;
+}
+
 .screenShareButton {
   composes: controlButton;
   background: rgba(var(--fg), 0.06);

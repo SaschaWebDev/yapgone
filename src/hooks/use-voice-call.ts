@@ -86,6 +86,8 @@ export function useVoiceCall({
   const [isDeafened, setIsDeafened] = useState(false)
   const [isE2eeEnabled, setIsE2eeEnabled] = useState(VOICE_E2EE_ENABLED)
   const [isReconnecting, setIsReconnecting] = useState(false)
+  const [e2eeDowngradeRequested, setE2eeDowngradeRequested] = useState(false)
+  const [e2eeDowngradeIncoming, setE2eeDowngradeIncoming] = useState(false)
 
   const pcRef = useRef<RTCPeerConnection | null>(null)
   const localStreamRef = useRef<MediaStream | null>(null)
@@ -105,6 +107,7 @@ export function useVoiceCall({
   const mediaKeyRawRef = useRef<Uint8Array | null>(mediaKeyRaw)
   const e2eeEnabledRef = useRef(VOICE_E2EE_ENABLED)
   const reconnectingRef = useRef(false)
+  const e2eeDowngradeRequestedRef = useRef(false)
 
   stateRef.current = callState
   mediaKeyRawRef.current = mediaKeyRaw
@@ -175,6 +178,9 @@ export function useVoiceCall({
     setIsE2eeEnabled(VOICE_E2EE_ENABLED)
     reconnectingRef.current = false
     setIsReconnecting(false)
+    e2eeDowngradeRequestedRef.current = false
+    setE2eeDowngradeRequested(false)
+    setE2eeDowngradeIncoming(false)
     setCallState('failed')
   }, [sendSignal, clearConnectingTimeout, clearDisconnectedTimeout, cleanupScreenShare, terminateMediaWorkers])
 
@@ -210,6 +216,9 @@ export function useVoiceCall({
     setIsE2eeEnabled(VOICE_E2EE_ENABLED)
     reconnectingRef.current = false
     setIsReconnecting(false)
+    e2eeDowngradeRequestedRef.current = false
+    setE2eeDowngradeRequested(false)
+    setE2eeDowngradeIncoming(false)
   }, [clearConnectingTimeout, clearDisconnectedTimeout, cleanupScreenShare, terminateMediaWorkers])
 
   const startDurationTimer = useCallback(() => {
@@ -520,9 +529,28 @@ export function useVoiceCall({
   const toggleE2ee = useCallback(() => {
     if (!_canToggleE2ee(stateRef.current, reconnectingRef.current)) return
     const newE2ee = !e2eeEnabledRef.current
-    sendSignal({ kind: 'e2ee-toggle', e2ee: newE2ee })
-    void softReconnect(newE2ee, true)
+    if (newE2ee) {
+      // Upgrade: immediate, no consent needed
+      sendSignal({ kind: 'e2ee-toggle', e2ee: true })
+      void softReconnect(true, true)
+    } else {
+      // Downgrade: request consent from peer
+      sendSignal({ kind: 'e2ee-downgrade-request' })
+      e2eeDowngradeRequestedRef.current = true
+      setE2eeDowngradeRequested(true)
+    }
   }, [sendSignal, softReconnect])
+
+  const acceptE2eeDowngrade = useCallback(() => {
+    setE2eeDowngradeIncoming(false)
+    sendSignal({ kind: 'e2ee-downgrade-accept' })
+    void softReconnect(false, false)
+  }, [sendSignal, softReconnect])
+
+  const declineE2eeDowngrade = useCallback(() => {
+    setE2eeDowngradeIncoming(false)
+    sendSignal({ kind: 'e2ee-downgrade-decline' })
+  }, [sendSignal])
 
   const acknowledgePrivacy = useCallback(() => {
     setPrivacyAcknowledged(true)
@@ -711,8 +739,40 @@ export function useVoiceCall({
       }
 
       case 'e2ee-toggle': {
+        if (!signal.e2ee) break // reject legacy downgrade signals
         if (!_canToggleE2ee(stateRef.current, reconnectingRef.current)) break
         void softReconnect(signal.e2ee, false)
+        break
+      }
+
+      case 'e2ee-downgrade-request': {
+        // Simultaneous request: both sides want to downgrade → mutual accept
+        if (e2eeDowngradeRequestedRef.current) {
+          e2eeDowngradeRequestedRef.current = false
+          setE2eeDowngradeRequested(false)
+          sendSignal({ kind: 'e2ee-downgrade-accept' })
+          void softReconnect(false, false)
+          break
+        }
+        if (!_canToggleE2ee(stateRef.current, reconnectingRef.current) || !e2eeEnabledRef.current) {
+          sendSignal({ kind: 'e2ee-downgrade-decline' })
+          break
+        }
+        setE2eeDowngradeIncoming(true)
+        break
+      }
+
+      case 'e2ee-downgrade-accept': {
+        if (!e2eeDowngradeRequestedRef.current) break
+        e2eeDowngradeRequestedRef.current = false
+        setE2eeDowngradeRequested(false)
+        void softReconnect(false, true)
+        break
+      }
+
+      case 'e2ee-downgrade-decline': {
+        e2eeDowngradeRequestedRef.current = false
+        setE2eeDowngradeRequested(false)
         break
       }
     }
@@ -784,6 +844,10 @@ export function useVoiceCall({
     toggleMute,
     toggleDeafen,
     toggleE2ee,
+    e2eeDowngradeRequested,
+    e2eeDowngradeIncoming,
+    acceptE2eeDowngrade,
+    declineE2eeDowngrade,
     acknowledgePrivacy,
     resetCallState,
     startScreenShare,
