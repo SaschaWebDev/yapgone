@@ -9,6 +9,23 @@ export const VOICE_NOTE_CHUNK_BYTES = 4_000
 export const VOICE_NOTE_AUDIO_BITRATE = 48_000
 export const VOICE_NOTE_ASSEMBLY_TIMEOUT_MS = 60_000
 
+export const FILE_MAX_IMAGE_BYTES = 5 * 1024 * 1024    // 5 MiB
+export const FILE_MAX_GENERAL_BYTES = 10 * 1024 * 1024  // 10 MiB
+export const FILE_CHUNK_BYTES = 16_000                   // 16 KiB
+export const FILE_ASSEMBLY_TIMEOUT_MS = 120_000          // 2 min
+export const FILE_MAX_CONCURRENT_TRANSFERS = 3
+export const FILE_SEND_DELAY_MS = 25
+
+export const IMAGE_MIME_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  'image/svg+xml',
+  'image/bmp',
+  'image/avif',
+])
+
 export const ROOM_INACTIVITY_TTL_MS = 30 * 60 * 1000 // 30 minutes
 
 export const MAX_SKIPPED_KEYS = 100
@@ -21,6 +38,9 @@ export const VOICE_CONNECT_TIMEOUT_MS = 20_000
 export const VOICE_DISCONNECTED_GRACE_MS = 5_000
 export const SAFE_WORD_MAX_ATTEMPTS = 3
 export const USERNAME_MAX_LENGTH = 24
+export const TIMED_MESSAGE_TTL_MS = 15_000
+export const TIMED_MESSAGE_FADEOUT_MS = 300
+export const TIMED_VOICE_FALLBACK_TTL_MS = 300_000
 
 export const DEFAULT_TITLE = 'yapgone'
 

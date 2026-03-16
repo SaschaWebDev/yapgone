@@ -2,15 +2,21 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { formatMessage } from '@/utils/format-message'
 import { EmojiQuickPick, EmojiFullPicker } from '../emoji-picker'
 import type { MessageReaction } from '@/hooks/use-chat'
+import { TIMED_MESSAGE_TTL_MS, TIMED_MESSAGE_FADEOUT_MS, TIMED_VOICE_FALLBACK_TTL_MS } from '@/constants'
 import styles from './MessageBubble.module.css'
 
 type PickerMode = 'closed' | 'compact' | 'expanded'
 
 interface MessageBubbleProps {
-  kind?: 'text' | 'audio'
+  kind?: 'text' | 'audio' | 'image' | 'file'
   text?: string
   audioUrl?: string
   durationMs?: number
+  fileUrl?: string
+  fileName?: string
+  fileMimeType?: string
+  fileSize?: number
+  transferProgress?: number
   sender: 'self' | 'peer' | 'system'
   displayName?: string
   timestamp: number
@@ -25,6 +31,14 @@ interface MessageBubbleProps {
   onDownload?: () => void
   skipAnimation?: boolean
   recentEmojis?: readonly string[]
+  timed?: boolean
+  onTimedExpire?: (msgId: string) => void
+  onPlayOnceComplete?: (msgId: string) => void
+  timedConsumed?: boolean
+  autoPlay?: boolean
+  onAudioEnded?: (msgId: string) => void
+  waveform?: readonly number[]
+  onImageClick?: () => void
 }
 
 function formatSeconds(seconds: number): string {
@@ -36,7 +50,11 @@ function formatSeconds(seconds: number): string {
 
 const SPEEDS = [1, 1.5, 2] as const
 
-function AudioPlayer({ src, durationMs, isSelf, timestamp }: { src: string; durationMs?: number; isSelf: boolean; timestamp: number }) {
+function AudioPlayer({ src, durationMs, waveform, isSelf, timestamp, timed, onPlayOnceComplete, autoPlay, onAudioEnded }: {
+  src: string; durationMs?: number; waveform?: readonly number[]; isSelf: boolean; timestamp: number;
+  timed?: boolean; onPlayOnceComplete?: () => void;
+  autoPlay?: boolean; onAudioEnded?: () => void;
+}) {
   const audioRef = useRef<HTMLAudioElement>(null)
   const trackRef = useRef<HTMLDivElement>(null)
   const [isPlaying, setIsPlaying] = useState(false)
@@ -44,20 +62,29 @@ function AudioPlayer({ src, durationMs, isSelf, timestamp }: { src: string; dura
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(durationMs ? durationMs / 1000 : 0)
   const [speedIndex, setSpeedIndex] = useState(0)
+  const [hasPlayed, setHasPlayed] = useState(false)
+  const hasPlayedRef = useRef(false)
+  const autoPlayedRef = useRef(false)
+
+  const isPlayOnce = timed && !isSelf
 
   useEffect(() => {
     const audio = audioRef.current
     if (!audio) return
 
     const onTimeUpdate = () => {
-      if (audio.duration && isFinite(audio.duration)) {
-        setProgress(audio.currentTime / audio.duration)
+      const knownDuration = durationMs ? durationMs / 1000 : 0
+      const effectiveDuration = knownDuration > 0
+        ? knownDuration
+        : (audio.duration && isFinite(audio.duration) ? audio.duration : 0)
+      if (effectiveDuration > 0) {
+        setProgress(Math.min(1, audio.currentTime / effectiveDuration))
         setCurrentTime(audio.currentTime)
       }
     }
 
     const onLoadedMetadata = () => {
-      if (audio.duration && isFinite(audio.duration)) {
+      if (!durationMs && audio.duration && isFinite(audio.duration)) {
         setDuration(audio.duration)
       }
     }
@@ -66,6 +93,8 @@ function AudioPlayer({ src, durationMs, isSelf, timestamp }: { src: string; dura
       setIsPlaying(false)
       setProgress(0)
       setCurrentTime(0)
+      onPlayOnceComplete?.()
+      onAudioEnded?.()
     }
 
     audio.addEventListener('timeupdate', onTimeUpdate)
@@ -77,11 +106,43 @@ function AudioPlayer({ src, durationMs, isSelf, timestamp }: { src: string; dura
       audio.removeEventListener('loadedmetadata', onLoadedMetadata)
       audio.removeEventListener('ended', onEnded)
     }
-  }, [])
+  }, [durationMs, onPlayOnceComplete, onAudioEnded])
+
+  useEffect(() => {
+    if (durationMs) setDuration(durationMs / 1000)
+  }, [durationMs])
+
+  useEffect(() => {
+    if (autoPlay && !autoPlayedRef.current) {
+      autoPlayedRef.current = true
+      const audio = audioRef.current
+      if (!audio) return
+      if (isPlayOnce) {
+        if (hasPlayedRef.current) return
+        hasPlayedRef.current = true
+        setHasPlayed(true)
+      }
+      audio.play().catch(() => setIsPlaying(false))
+      setIsPlaying(true)
+    }
+    if (!autoPlay) {
+      autoPlayedRef.current = false
+    }
+  }, [autoPlay, isPlayOnce])
 
   const togglePlay = useCallback(() => {
     const audio = audioRef.current
     if (!audio) return
+
+    if (isPlayOnce) {
+      if (hasPlayedRef.current) return
+      hasPlayedRef.current = true
+      setHasPlayed(true)
+      audio.play().catch(() => setIsPlaying(false))
+      setIsPlaying(true)
+      return
+    }
+
     if (isPlaying) {
       audio.pause()
       setIsPlaying(false)
@@ -89,19 +150,25 @@ function AudioPlayer({ src, durationMs, isSelf, timestamp }: { src: string; dura
       audio.play().catch(() => setIsPlaying(false))
       setIsPlaying(true)
     }
-  }, [isPlaying])
+  }, [isPlaying, isPlayOnce])
 
   const handleSeek = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (isPlayOnce) return
     const audio = audioRef.current
     const track = trackRef.current
-    if (!audio || !track || !audio.duration || !isFinite(audio.duration)) return
+    if (!audio || !track) return
+    const knownDuration = durationMs ? durationMs / 1000 : 0
+    const effectiveDuration = knownDuration > 0
+      ? knownDuration
+      : (audio.duration && isFinite(audio.duration) ? audio.duration : 0)
+    if (effectiveDuration <= 0) return
     const rect = track.getBoundingClientRect()
     const x = e.clientX - rect.left
     const ratio = Math.max(0, Math.min(1, x / rect.width))
-    audio.currentTime = ratio * audio.duration
+    audio.currentTime = ratio * effectiveDuration
     setProgress(ratio)
     setCurrentTime(audio.currentTime)
-  }, [])
+  }, [isPlayOnce, durationMs])
 
   const cycleSpeed = useCallback(() => {
     const next = (speedIndex + 1) % SPEEDS.length
@@ -121,20 +188,29 @@ function AudioPlayer({ src, durationMs, isSelf, timestamp }: { src: string; dura
     minute: '2-digit',
   })
 
+  const playButtonDisabled = isPlayOnce && hasPlayed && !isPlaying
+
   return (
     <div className={styles.audioPlayer}>
       <div className={styles.audioControls}>
         <audio ref={audioRef} src={src} preload="metadata" />
         <button
-          className={`${styles.playButton} ${isSelf ? styles.playButtonSelf : styles.playButtonPeer}`}
+          className={`${styles.playButton} ${isSelf ? styles.playButtonSelf : styles.playButtonPeer}${playButtonDisabled ? ` ${styles.playButtonDisabled}` : ''}`}
           onClick={togglePlay}
-          aria-label={isPlaying ? 'Pause' : 'Play'}
+          disabled={playButtonDisabled}
+          aria-label={isPlaying ? (isPlayOnce ? 'Playing' : 'Pause') : 'Play'}
         >
           {isPlaying ? (
-            <svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor">
-              <rect x="6" y="4" width="4" height="16" rx="1" />
-              <rect x="14" y="4" width="4" height="16" rx="1" />
-            </svg>
+            isPlayOnce ? (
+              <svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="7 3 21 12 7 21" />
+              </svg>
+            ) : (
+              <svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="6" y="4" width="4" height="16" rx="1" />
+                <rect x="14" y="4" width="4" height="16" rx="1" />
+              </svg>
+            )
           ) : (
             <svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor">
               <polygon points="7 3 21 12 7 21" />
@@ -143,28 +219,62 @@ function AudioPlayer({ src, durationMs, isSelf, timestamp }: { src: string; dura
         </button>
         <div
           ref={trackRef}
-          className={`${styles.progressTrack} ${isSelf ? styles.progressTrackSelf : styles.progressTrackPeer}`}
+          className={`${styles.waveformTrack}${isPlayOnce ? ` ${styles.waveformTrackNoSeek}` : ''}`}
           onClick={handleSeek}
           role="progressbar"
           aria-valuenow={Math.round(progress * 100)}
           aria-valuemin={0}
           aria-valuemax={100}
         >
-          <div
-            className={`${styles.progressFill} ${isSelf ? styles.progressFillSelf : styles.progressFillPeer}`}
-            style={{ width: `${progress * 100}%` }}
-          />
+          {waveform && waveform.length > 0 ? (
+            waveform.map((peak, i) => (
+              <div
+                key={i}
+                className={`${styles.waveformBar} ${
+                  i / waveform.length < progress
+                    ? (isSelf ? styles.waveformBarPlayedSelf : styles.waveformBarPlayedPeer)
+                    : (isSelf ? styles.waveformBarUnplayedSelf : styles.waveformBarUnplayedPeer)
+                }`}
+                style={{ height: `${Math.max(3, peak * 28)}px` }}
+              />
+            ))
+          ) : (
+            <div className={`${styles.progressTrackInner} ${isSelf ? styles.progressTrackSelf : styles.progressTrackPeer}`}>
+              <div
+                className={`${styles.progressFill} ${isSelf ? styles.progressFillSelf : styles.progressFillPeer}`}
+                style={{ width: `${progress * 100}%` }}
+              />
+            </div>
+          )}
         </div>
         <span className={styles.audioDuration}>{timeLabel}</span>
       </div>
       <div className={styles.audioMeta}>
-        <button
-          className={`${styles.speedBadge} ${isSelf ? styles.speedBadgeSelf : styles.speedBadgePeer} ${speedIndex > 0 ? styles.speedActive : ''}`}
-          onClick={cycleSpeed}
-          aria-label={`Playback speed ${SPEEDS[speedIndex]}×`}
-        >
-          {SPEEDS[speedIndex]}×
-        </button>
+        {isPlayOnce ? (
+          <span className={styles.timedAudioBadge}>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="12 6 12 12 16 14" />
+            </svg>
+            timed
+          </span>
+        ) : timed ? (
+          <span className={styles.timedAudioBadge}>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="12 6 12 12 16 14" />
+            </svg>
+            timed
+          </span>
+        ) : (
+          <button
+            className={`${styles.speedBadge} ${isSelf ? styles.speedBadgeSelf : styles.speedBadgePeer} ${speedIndex > 0 ? styles.speedActive : ''}`}
+            onClick={cycleSpeed}
+            aria-label={`Playback speed ${SPEEDS[speedIndex]}×`}
+          >
+            {SPEEDS[speedIndex]}×
+          </button>
+        )}
         <div className={styles.audioMetaRight}>
           <time className={styles.time} dateTime={new Date(timestamp).toISOString()}>
             {formattedTime}
@@ -199,11 +309,22 @@ function groupReactions(reactions: MessageReaction[]): GroupedReaction[] {
   }))
 }
 
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
 export function MessageBubble({
   kind = 'text',
   text,
   audioUrl,
   durationMs,
+  fileUrl,
+  fileName,
+  fileMimeType,
+  fileSize,
+  transferProgress,
   sender,
   displayName,
   timestamp,
@@ -218,14 +339,102 @@ export function MessageBubble({
   onDownload,
   skipAnimation,
   recentEmojis = [],
+  timed,
+  onTimedExpire,
+  onPlayOnceComplete,
+  timedConsumed,
+  waveform,
+  autoPlay,
+  onAudioEnded,
+  onImageClick,
 }: MessageBubbleProps) {
   const [pickerMode, setPickerMode] = useState<PickerMode>('closed')
   const [copyDone, setCopyDone] = useState(false)
   const [compact, setCompact] = useState(false)
+  const [timedTimerProgress, setTimedTimerProgress] = useState(0)
+  const [fadingOut, setFadingOut] = useState(false)
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const longPressRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const timedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const timedIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const onTimedExpireRef = useRef(onTimedExpire)
   const bubbleRef = useRef<HTMLDivElement>(null)
   const emojiTriggerRef = useRef<HTMLButtonElement>(null)
+
+  onTimedExpireRef.current = onTimedExpire
+
+  // Timed text messages: auto-start countdown on render
+  useEffect(() => {
+    if (!timed || !msgId || kind === 'audio') return
+    const ttl = TIMED_MESSAGE_TTL_MS
+    const startTime = Date.now()
+
+    timedIntervalRef.current = setInterval(() => {
+      setTimedTimerProgress(Math.min(1, (Date.now() - startTime) / ttl))
+    }, 50)
+
+    timedTimerRef.current = setTimeout(() => {
+      if (timedIntervalRef.current) clearInterval(timedIntervalRef.current)
+      setTimedTimerProgress(1)
+      setFadingOut(true)
+      setTimeout(() => onTimedExpireRef.current?.(msgId), TIMED_MESSAGE_FADEOUT_MS)
+    }, ttl)
+
+    return () => {
+      if (timedTimerRef.current) clearTimeout(timedTimerRef.current)
+      if (timedIntervalRef.current) clearInterval(timedIntervalRef.current)
+    }
+  }, [timed, msgId, kind])
+
+  // Timed audio: fallback TTL timer (receiver never plays, or sender never gets consumed signal)
+  useEffect(() => {
+    if (!timed || !msgId || kind !== 'audio') return
+    const ttl = TIMED_VOICE_FALLBACK_TTL_MS
+    const startTime = Date.now()
+
+    timedIntervalRef.current = setInterval(() => {
+      setTimedTimerProgress(Math.min(1, (Date.now() - startTime) / ttl))
+    }, 50)
+
+    timedTimerRef.current = setTimeout(() => {
+      if (timedIntervalRef.current) clearInterval(timedIntervalRef.current)
+      setTimedTimerProgress(1)
+      setFadingOut(true)
+      setTimeout(() => onTimedExpireRef.current?.(msgId), TIMED_MESSAGE_FADEOUT_MS)
+    }, ttl)
+
+    return () => {
+      if (timedTimerRef.current) clearTimeout(timedTimerRef.current)
+      if (timedIntervalRef.current) clearInterval(timedIntervalRef.current)
+    }
+  }, [timed, msgId, kind])
+
+  // Handle timedConsumed signal (sender side): peer listened, start fade
+  useEffect(() => {
+    if (!timedConsumed || !msgId) return
+    if (timedTimerRef.current) clearTimeout(timedTimerRef.current)
+    if (timedIntervalRef.current) clearInterval(timedIntervalRef.current)
+    setFadingOut(true)
+    const t = setTimeout(() => onTimedExpireRef.current?.(msgId), TIMED_MESSAGE_FADEOUT_MS)
+    return () => clearTimeout(t)
+  }, [timedConsumed, msgId])
+
+  const handleAudioPlayOnceComplete = useCallback(() => {
+    if (!msgId || !timed) return
+    // Cancel fallback timer
+    if (timedTimerRef.current) clearTimeout(timedTimerRef.current)
+    if (timedIntervalRef.current) clearInterval(timedIntervalRef.current)
+    // Notify parent (sends timed-consumed signal)
+    onPlayOnceComplete?.(msgId)
+    // Start fade-out
+    setFadingOut(true)
+    setTimeout(() => onTimedExpireRef.current?.(msgId), TIMED_MESSAGE_FADEOUT_MS)
+  }, [msgId, timed, onPlayOnceComplete])
+
+  const handleAudioEnded = useCallback(() => {
+    if (!msgId) return
+    onAudioEnded?.(msgId)
+  }, [msgId, onAudioEnded])
 
   const handleCopy = useCallback(() => {
     if (!onCopy || copyDone) return
@@ -307,7 +516,7 @@ export function MessageBubble({
   const anchorRect = emojiTriggerRef.current?.getBoundingClientRect()
 
   return (
-    <div className={`${styles.bubbleWrapper} ${isSelf ? styles.bubbleWrapperSelf : styles.bubbleWrapperPeer}${kind === 'audio' ? ` ${styles.bubbleWrapperAudio}` : ''}${hasReactions ? ` ${styles.bubbleWrapperHasReactions}` : ''}`} data-msg-id={msgId} role="listitem">
+    <div className={`${styles.bubbleWrapper} ${isSelf ? styles.bubbleWrapperSelf : styles.bubbleWrapperPeer}${kind === 'audio' ? ` ${styles.bubbleWrapperAudio}` : ''}${kind === 'image' ? ` ${styles.bubbleWrapperImage}` : ''}${kind === 'file' ? ` ${styles.bubbleWrapperFile}` : ''}${hasReactions ? ` ${styles.bubbleWrapperHasReactions}` : ''}${fadingOut ? ` ${styles.timedFadingOut}` : ''}`} data-msg-id={msgId} role="listitem">
       <div
         ref={bubbleRef}
         className={`${styles.bubble} ${isSelf ? styles.self : styles.peer}${compact && kind !== 'audio' ? ` ${styles.compactActions}` : ''}${kind === 'audio' ? ` ${styles.audioActions}` : ''}${skipAnimation ? ` ${styles.noAnimation}` : ''}`}
@@ -327,14 +536,117 @@ export function MessageBubble({
           </div>
         )}
         {kind === 'audio' && audioUrl ? (
-          <AudioPlayer src={audioUrl} durationMs={durationMs} isSelf={isSelf} timestamp={timestamp} />
+          <AudioPlayer
+            src={audioUrl}
+            durationMs={durationMs}
+            waveform={waveform}
+            isSelf={isSelf}
+            timestamp={timestamp}
+            timed={timed}
+            onPlayOnceComplete={timed && !isSelf ? handleAudioPlayOnceComplete : undefined}
+            autoPlay={autoPlay}
+            onAudioEnded={handleAudioEnded}
+          />
+        ) : kind === 'image' ? (
+          <div className={styles.imageContainer}>
+            {timed && (
+              <span className={styles.timedBadge}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <polyline points="12 6 12 12 16 14" />
+                </svg>
+                timed
+              </span>
+            )}
+            {transferProgress !== undefined ? (
+              <div className={styles.transferPlaceholder}>
+                <div className={styles.transferProgressBar}>
+                  <div
+                    className={`${styles.transferProgressFill} ${isSelf ? styles.transferProgressFillSelf : styles.transferProgressFillPeer}`}
+                    style={{ width: `${Math.round(transferProgress * 100)}%` }}
+                  />
+                </div>
+                <span className={styles.transferText}>
+                  {Math.round(transferProgress * 100)}%
+                  {fileSize ? ` of ${formatFileSize(fileSize)}` : ''}
+                </span>
+              </div>
+            ) : fileUrl ? (
+              <img
+                className={styles.imageContent}
+                src={fileUrl}
+                alt={fileName ?? 'Image'}
+                loading="lazy"
+                onClick={onImageClick}
+              />
+            ) : null}
+            <div className={styles.imageFooter}>
+              {fileName && <span className={styles.imageFileName}>{fileName}</span>}
+              <time className={styles.time} dateTime={new Date(timestamp).toISOString()}>
+                {time}
+              </time>
+            </div>
+          </div>
+        ) : kind === 'file' ? (
+          <div className={styles.fileCard}>
+            {timed && (
+              <span className={styles.timedBadge}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <polyline points="12 6 12 12 16 14" />
+                </svg>
+                timed
+              </span>
+            )}
+            <div className={styles.fileCardBody}>
+              <svg className={styles.fileIcon} width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+              </svg>
+              <div className={styles.fileInfo}>
+                <span className={styles.fileName}>{fileName ?? 'File'}</span>
+                <span className={styles.fileMeta}>
+                  {fileSize ? formatFileSize(fileSize) : ''}
+                  {fileMimeType ? ` · ${fileMimeType.split('/')[1] ?? fileMimeType}` : ''}
+                </span>
+              </div>
+            </div>
+            {transferProgress !== undefined ? (
+              <div className={styles.transferProgressBar}>
+                <div
+                  className={`${styles.transferProgressFill} ${isSelf ? styles.transferProgressFillSelf : styles.transferProgressFillPeer}`}
+                  style={{ width: `${Math.round(transferProgress * 100)}%` }}
+                />
+              </div>
+            ) : null}
+            <time className={styles.time} dateTime={new Date(timestamp).toISOString()}>
+              {time}
+            </time>
+          </div>
         ) : (
           <>
+            {timed && (
+              <span className={styles.timedBadge}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <polyline points="12 6 12 12 16 14" />
+                </svg>
+                timed
+              </span>
+            )}
             <p className={styles.text}>{text ? formatMessage(text) : ''}</p>
             <time className={styles.time} dateTime={new Date(timestamp).toISOString()}>
               {time}
             </time>
           </>
+        )}
+        {timed && (
+          <div className={styles.timedTimerBar}>
+            <div
+              className={styles.timedTimerFill}
+              style={{ width: `${(1 - timedTimerProgress) * 100}%` }}
+            />
+          </div>
         )}
         {onCopy && kind === 'text' && (
           <button
@@ -355,7 +667,7 @@ export function MessageBubble({
             )}
           </button>
         )}
-        {onDownload && kind === 'audio' && (
+        {onDownload && (kind === 'audio' || kind === 'image' || kind === 'file') && (
           <button
             type="button"
             className={styles.downloadActionButton}
