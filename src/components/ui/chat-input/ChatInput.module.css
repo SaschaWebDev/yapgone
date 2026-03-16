@@ -251,3 +251,78 @@
 .playButton:hover {
   opacity: 0.85;
 }
+
+.splitButton {
+  display: flex;
+  align-items: stretch;
+  height: 2.75rem;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.splitButtonLeft {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.splitButtonLeft:hover:not(:disabled) { opacity: 0.85; }
+.splitButtonLeft:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.splitDivider {
+  width: 1px;
+  background: rgba(255, 255, 255, 0.3);
+  align-self: stretch;
+}
+
+.splitButtonRight {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.splitButtonRight:hover:not(:disabled) { opacity: 0.85; }
+.splitButtonRight:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.hiddenFileInput {
+  display: none;
+}
+
+.attachButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.attachButton:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.attachButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+

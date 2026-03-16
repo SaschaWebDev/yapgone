@@ -1,9 +1,10 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { IconMic, IconPause, IconPlay, IconTrash } from '../icons';
+import { IconMic, IconPause, IconPlay, IconTrash, IconViewOnce, IconAttachment } from '../icons';
 import styles from './ChatInput.module.css';
 
 interface ChatInputProps {
   onSend: (text: string) => void;
+  onSendTimed?: (text: string) => void;
   onTyping: (active: boolean) => void;
   disabled: boolean;
   maxLength: number;
@@ -13,6 +14,7 @@ interface ChatInputProps {
   recordingDuration?: number;
   onStartRecording?: () => void;
   onStopRecording?: () => void;
+  onStopRecordingTimed?: () => void;
   onCancelRecording?: () => void;
   voiceNoteError?: string | null;
   voiceNoteSizeWarningSeconds?: number | null;
@@ -21,6 +23,8 @@ interface ChatInputProps {
   previewAudioUrl?: string | null;
   previewDurationMs?: number;
   previewWaveform?: number[];
+  onSendFile?: (file: File) => void;
+  fileError?: string | null;
 }
 
 const TYPING_TIMEOUT = 5_000;
@@ -40,6 +44,7 @@ function formatMs(ms: number): string {
 
 export function ChatInput({
   onSend,
+  onSendTimed,
   onTyping,
   disabled,
   maxLength,
@@ -49,6 +54,7 @@ export function ChatInput({
   recordingDuration = 0,
   onStartRecording,
   onStopRecording,
+  onStopRecordingTimed,
   onCancelRecording,
   voiceNoteError,
   voiceNoteSizeWarningSeconds,
@@ -57,6 +63,8 @@ export function ChatInput({
   previewAudioUrl,
   previewDurationMs = 0,
   previewWaveform,
+  onSendFile,
+  fileError,
 }: ChatInputProps) {
   const [text, setText] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -69,6 +77,16 @@ export function ChatInput({
   const [playbackMs, setPlaybackMs] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const animFrameRef = useRef<number | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !onSendFile) return;
+    onSendFile(file);
+    // Reset the input so the same file can be selected again
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }, [onSendFile]);
 
   const canAutoFocus = !disabled && !isRecording;
 
@@ -188,14 +206,18 @@ export function ChatInput({
     }
   }, []);
 
-  const handleSend = useCallback(() => {
+  const handleSend = useCallback((timed = false) => {
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = null;
     }
     const trimmed = text.trim();
     if (!trimmed || disabled) return;
-    onSend(trimmed);
+    if (timed && onSendTimed) {
+      onSendTimed(trimmed);
+    } else {
+      onSend(trimmed);
+    }
     setText('');
     textRef.current = '';
     if (isTypingRef.current) {
@@ -203,7 +225,7 @@ export function ChatInput({
       onTyping(false);
     }
     textareaRef.current?.focus();
-  }, [text, disabled, onSend, onTyping]);
+  }, [text, disabled, onSend, onSendTimed, onTyping]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -220,7 +242,7 @@ export function ChatInput({
       }
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        handleSend();
+        handleSend(false);
       }
     },
     [handleSend, wrapSelection],
@@ -388,13 +410,23 @@ export function ChatInput({
           >
             <IconMic size={22} />
           </button>
-          <button
-            className={styles.sendButton}
-            onClick={onStopRecording}
-            aria-label='Send voice note'
-          >
-            {sendIcon}
-          </button>
+          <div className={styles.splitButton}>
+            <button
+              className={styles.splitButtonLeft}
+              onClick={onStopRecording}
+              aria-label='Send voice note'
+            >
+              {sendIcon}
+            </button>
+            <div className={styles.splitDivider} />
+            <button
+              className={styles.splitButtonRight}
+              onClick={onStopRecordingTimed}
+              aria-label='Send as timed voice note'
+            >
+              <IconViewOnce size={20} />
+            </button>
+          </div>
         </div>
         {voiceNoteError && (
           <span className={styles.voiceNoteError}>{voiceNoteError}</span>
@@ -434,13 +466,23 @@ export function ChatInput({
           >
             <IconPause size={22} />
           </button>
-          <button
-            className={styles.sendButton}
-            onClick={onStopRecording}
-            aria-label='Send voice note'
-          >
-            {sendIcon}
-          </button>
+          <div className={styles.splitButton}>
+            <button
+              className={styles.splitButtonLeft}
+              onClick={onStopRecording}
+              aria-label='Send voice note'
+            >
+              {sendIcon}
+            </button>
+            <div className={styles.splitDivider} />
+            <button
+              className={styles.splitButtonRight}
+              onClick={onStopRecordingTimed}
+              aria-label='Send as timed voice note'
+            >
+              <IconViewOnce size={20} />
+            </button>
+          </div>
         </div>
         {voiceNoteError && (
           <span className={styles.voiceNoteError}>{voiceNoteError}</span>
@@ -453,6 +495,27 @@ export function ChatInput({
   return (
     <div className={styles.wrapper}>
       <div className={styles.container}>
+        {onSendFile && (
+          <>
+            <input
+              ref={fileInputRef}
+              type='file'
+              className={styles.hiddenFileInput}
+              onChange={handleFileSelect}
+              disabled={disabled}
+              tabIndex={-1}
+            />
+            <button
+              className={styles.attachButton}
+              onClick={() => fileInputRef.current?.click()}
+              disabled={disabled}
+              aria-label='Attach file'
+              type='button'
+            >
+              <IconAttachment size={22} />
+            </button>
+          </>
+        )}
         <textarea
           ref={textareaRef}
           className={styles.input}
@@ -474,18 +537,32 @@ export function ChatInput({
             <IconMic size={30} />
           </button>
         ) : (
-          <button
-            className={styles.sendButton}
-            onClick={handleSend}
-            disabled={disabled || !text.trim()}
-            aria-label='Send message'
-          >
-            {sendIcon}
-          </button>
+          <div className={styles.splitButton}>
+            <button
+              className={styles.splitButtonLeft}
+              onClick={() => handleSend(false)}
+              disabled={disabled || !text.trim()}
+              aria-label='Send message'
+            >
+              {sendIcon}
+            </button>
+            <div className={styles.splitDivider} />
+            <button
+              className={styles.splitButtonRight}
+              onClick={() => handleSend(true)}
+              disabled={disabled || !text.trim()}
+              aria-label='Send as timed message'
+            >
+              <IconViewOnce size={20} />
+            </button>
+          </div>
         )}
       </div>
       {voiceNoteError && (
         <span className={styles.voiceNoteError}>{voiceNoteError}</span>
+      )}
+      {fileError && (
+        <span className={styles.voiceNoteError}>{fileError}</span>
       )}
       {maxLength - text.length <= 0 && (
         <span className={styles.charLimitMax}>Character limit reached</span>

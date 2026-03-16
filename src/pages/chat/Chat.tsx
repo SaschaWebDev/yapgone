@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState, useCallback, type FormEvent } from 'react';
+import { computeWaveform } from '@/utils';
 import chatBubbleStyles from '@/components/ui/message-bubble/MessageBubble.module.css';
 import { useChatAsCreator, useChatAsJoiner, useVoiceCall, useNotifications, useLocalChatSettings, useInactivityTimer, useRecentEmojis } from '@/hooks';
 import type { VoiceSignal } from '@/types';
@@ -25,6 +26,7 @@ import {
   QrCode,
   ReplyPreview,
   InactivityCountdown,
+  ImageLightbox,
 } from '@/components';
 import {
   MAX_MESSAGE_LENGTH,
@@ -41,6 +43,9 @@ import {
   SAFE_WORD_MAX_ATTEMPTS,
   USERNAME_MAX_LENGTH,
   ROOM_INACTIVITY_TTL_MS,
+  FILE_MAX_IMAGE_BYTES,
+  FILE_MAX_GENERAL_BYTES,
+  IMAGE_MIME_TYPES,
 } from '@/constants';
 import styles from './Chat.module.css';
 
@@ -165,9 +170,12 @@ function CreatorChat({ initialRoomSettings }: { initialRoomSettings: RoomSetting
     inviteUrl,
     sendMessage,
     sendReaction,
+    removeTimedMessage,
+    sendTimedConsumed,
     sendTyping,
     sendVoiceSignal,
     sendVoiceNote,
+    sendFile,
     endChat,
     endChatForAll,
     roomSettings,
@@ -196,8 +204,11 @@ function CreatorChat({ initialRoomSettings }: { initialRoomSettings: RoomSetting
       error={error}
       onSend={sendMessage}
       onReact={sendReaction}
+      onRemoveTimedMessage={removeTimedMessage}
+      onSendTimedConsumed={sendTimedConsumed}
       onTyping={sendTyping}
       onSendVoiceNote={sendVoiceNote}
+      onSendFile={sendFile}
       onEnd={endChat}
       onEndForAll={endChatForAll}
       roomSettings={roomSettings}
@@ -227,9 +238,12 @@ function JoinerChat({
     peerTyping,
     sendMessage,
     sendReaction,
+    removeTimedMessage,
+    sendTimedConsumed,
     sendTyping,
     sendVoiceSignal,
     sendVoiceNote,
+    sendFile,
     endChat,
     endChatForAll,
     roomSettings,
@@ -257,8 +271,11 @@ function JoinerChat({
       error={error}
       onSend={sendMessage}
       onReact={sendReaction}
+      onRemoveTimedMessage={removeTimedMessage}
+      onSendTimedConsumed={sendTimedConsumed}
       onTyping={sendTyping}
       onSendVoiceNote={sendVoiceNote}
+      onSendFile={sendFile}
       onEnd={endChat}
       onEndForAll={endChatForAll}
       roomSettings={roomSettings}
@@ -284,30 +301,7 @@ function deriveConnectionQuality(phase: string, msgs: ChatMessage[]): Connection
   return 'good'
 }
 
-async function computeWaveform(blob: Blob): Promise<number[]> {
-  try {
-    const arrayBuffer = await blob.arrayBuffer();
-    const audioCtx = new AudioContext();
-    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-    const data = audioBuffer.getChannelData(0);
-    const barCount = 40;
-    const step = Math.floor(data.length / barCount);
-    const peaks: number[] = [];
-    for (let i = 0; i < barCount; i++) {
-      let max = 0;
-      for (let j = 0; j < step; j++) {
-        const v = Math.abs(data[i * step + j] ?? 0);
-        if (v > max) max = v;
-      }
-      peaks.push(max);
-    }
-    const maxPeak = Math.max(...peaks, 0.01);
-    await audioCtx.close();
-    return peaks.map((p) => p / maxPeak);
-  } catch {
-    return Array.from({ length: 40 }, () => 0.5);
-  }
-}
+// computeWaveform extracted to @/utils/compute-waveform
 
 interface VoiceState {
   callState: import('@/types').CallState;
@@ -319,6 +313,8 @@ interface VoiceState {
   isDeafened: boolean;
   isE2eeEnabled: boolean;
   isReconnecting: boolean;
+  e2eeDowngradeRequested: boolean;
+  e2eeDowngradeIncoming: boolean;
   startCall: () => void;
   acceptCall: () => Promise<void>;
   declineCall: () => void;
@@ -326,6 +322,8 @@ interface VoiceState {
   toggleMute: () => void;
   toggleDeafen: () => void;
   toggleE2ee: () => void;
+  acceptE2eeDowngrade: () => void;
+  declineE2eeDowngrade: () => void;
   acknowledgePrivacy: () => void;
   resetCallState: () => void;
   startScreenShare: () => Promise<void>;
@@ -338,10 +336,13 @@ interface ChatViewProps {
   peerTyping: boolean;
   inviteUrl: string | null;
   error: string | null;
-  onSend: (text: string, replyTo?: string) => void;
+  onSend: (text: string, replyTo?: string, timed?: boolean) => void;
   onReact: (msgId: string, emoji: string, action: 'add' | 'remove') => void;
+  onRemoveTimedMessage: (msgId: string) => void;
   onTyping: (active: boolean) => void;
-  onSendVoiceNote: (blob: Blob, durationMs: number, mimeType: string) => Promise<void>;
+  onSendVoiceNote: (blob: Blob, durationMs: number, mimeType: string, timed?: boolean) => Promise<void>;
+  onSendFile: (file: File, timed?: boolean) => Promise<void>;
+  onSendTimedConsumed: (noteId: string) => Promise<void>;
   onEnd: () => void;
   onEndForAll: () => void;
   roomSettings: RoomSettings;
@@ -361,8 +362,11 @@ function ChatView({
   error,
   onSend,
   onReact,
+  onRemoveTimedMessage,
   onTyping,
   onSendVoiceNote,
+  onSendFile,
+  onSendTimedConsumed,
   onEnd,
   onEndForAll,
   roomSettings,
@@ -403,7 +407,11 @@ function ChatView({
   const [localSettingsOpen, setLocalSettingsOpen] = useState(false);
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
   const [inputFocusTrigger, setInputFocusTrigger] = useState(0);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const [autoPlayNextId, setAutoPlayNextId] = useState<string | null>(null);
+  const [lightboxImage, setLightboxImage] = useState<{ url: string; fileName?: string } | null>(null);
   const isAtBottomRef = useRef(true);
+  const timedModeRef = useRef(false);
   const safeWordDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -470,6 +478,27 @@ function ChatView({
     setReplyingTo(null);
   }, [onSend, replyingTo]);
 
+  const handleSendTimed = useCallback((text: string) => {
+    onSend(text, replyingTo?.id, true);
+    setReplyingTo(null);
+  }, [onSend, replyingTo]);
+
+  const handleSendFile = useCallback((file: File) => {
+    setFileError(null);
+    const maxBytes = IMAGE_MIME_TYPES.has(file.type) ? FILE_MAX_IMAGE_BYTES : FILE_MAX_GENERAL_BYTES;
+    if (file.size === 0) {
+      setFileError('File is empty');
+      return;
+    }
+    if (file.size > maxBytes) {
+      const limitMB = Math.round(maxBytes / (1024 * 1024));
+      setFileError(`File too large (max ${limitMB} MB)`);
+      return;
+    }
+    onSendFile(file)
+      .catch(() => setFileError('Failed to send file'));
+  }, [onSendFile]);
+
   const handleCopyMessage = useCallback(async (text: string) => {
     try {
       await navigator.clipboard.writeText(text)
@@ -503,6 +532,35 @@ function ChatView({
     trackEmoji(emoji);
     onReact(msgId, emoji, alreadyReacted ? 'remove' : 'add');
   }, [messages, onReact, trackEmoji]);
+
+  const handleTimedExpire = useCallback((msgId: string) => {
+    onRemoveTimedMessage(msgId);
+  }, [onRemoveTimedMessage]);
+
+
+  const handlePlayOnceComplete = useCallback((msgId: string) => {
+    onSendTimedConsumed(msgId);
+  }, [onSendTimedConsumed]);
+
+  const handleAudioEnded = useCallback((msgId: string) => {
+    const idx = messages.findIndex(m => m.id === msgId);
+    if (idx === -1 || idx >= messages.length - 1) {
+      setAutoPlayNextId(null);
+      return;
+    }
+    const next = messages[idx + 1];
+    if (next && next.kind === 'audio' && next.audioUrl) {
+      setAutoPlayNextId(next.id);
+    } else {
+      setAutoPlayNextId(null);
+    }
+  }, [messages]);
+
+  useEffect(() => {
+    if (autoPlayNextId && !messages.some(m => m.id === autoPlayNextId)) {
+      setAutoPlayNextId(null);
+    }
+  }, [messages, autoPlayNextId]);
 
   const newChatButton = (
     <button className={styles.restartLink} onClick={handleNewChat}>
@@ -698,6 +756,8 @@ function ChatView({
         const mimeType = recorder.mimeType || 'audio/webm';
         const blob = new Blob(voiceNoteChunksRef.current, { type: mimeType });
         const durationMs = Math.max(0, Date.now() - (voiceNoteStartedAtRef.current ?? Date.now()) - totalPausedMsRef.current);
+        const wasTimed = timedModeRef.current;
+        timedModeRef.current = false;
 
         clearVoiceNoteRecorder();
 
@@ -707,7 +767,7 @@ function ChatView({
         }
 
         setIsSendingVoiceNote(true);
-        onSendVoiceNote(blob, durationMs, mimeType)
+        onSendVoiceNote(blob, durationMs, mimeType, wasTimed || undefined)
           .then(() => setVoiceNoteError(null))
           .catch(() => setVoiceNoteError('Failed to send voice note'))
           .finally(() => setIsSendingVoiceNote(false));
@@ -760,6 +820,11 @@ function ChatView({
     }
     recorder.stop();
   }, []);
+
+  const stopVoiceNoteRecordingTimed = useCallback(() => {
+    timedModeRef.current = true;
+    stopVoiceNoteRecording();
+  }, [stopVoiceNoteRecording]);
 
   const togglePauseRecording = useCallback(async () => {
     const recorder = mediaRecorderRef.current;
@@ -959,109 +1024,122 @@ function ChatView({
   if (phase === 'waiting') {
     return (
       <div className={styles.wrapper}>
-        <div className={styles.centered}>
-          <p className={styles.status}>Waiting for partner...</p>
-          {inviteUrl && (
-            <>
-              <p className={styles.inviteLabel}>
-                Share this link with your partner:
-              </p>
-              <div className={styles.inviteRow}>
-                <div
-                  className={`${styles.inviteBox} ${copied ? styles.inviteBoxCopied : ''}`}
-                  onClick={handleCopy}
-                  role='button'
-                  tabIndex={0}
-                >
-                  <code className={styles.urlText}>{inviteUrl}</code>
-                  <div className={styles.inviteActions}>
-                    <button
-                      type='button'
-                      className={styles.copyIcon}
+        <div className={styles.waitingLayout}>
+          <div className={styles.shareZone}>
+            {inviteUrl && (
+              <>
+                <p className={styles.inviteLabel}>
+                  Share this link with your partner:
+                </p>
+                <div className={styles.inviteRow}>
+                  <div
+                    className={`${styles.inviteBox} ${copied ? styles.inviteBoxCopied : ''}`}
+                  >
+                    <div
+                      className={styles.inviteBoxTop}
                       onClick={handleCopy}
-                      title={copied ? 'copied' : 'copy to clipboard'}
+                      role='button'
+                      tabIndex={0}
                     >
-                      {copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
-                    </button>
-                    {onUpdateRoomSettings && (
-                      <button
-                        type='button'
-                        className={`${styles.gearButton} ${settingsOpen ? styles.gearButtonActive : ''}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSettingsOpen((prev) => {
-                            if (prev) flushPendingSafeWord();
-                            return !prev;
-                          });
-                        }}
-                        title='Chat room settings'
-                      >
-                        <IconGear size={21} />
-                      </button>
+                      <code className={styles.urlText}>{inviteUrl}</code>
+                      <div className={styles.inviteActions}>
+                        <button
+                          type='button'
+                          className={styles.copyIcon}
+                          onClick={handleCopy}
+                          title={copied ? 'copied' : 'copy to clipboard'}
+                        >
+                          {copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
+                        </button>
+                        {onUpdateRoomSettings && (
+                          <button
+                            type='button'
+                            className={`${styles.gearButton} ${settingsOpen ? styles.gearButtonActive : ''}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSettingsOpen((prev) => {
+                                if (prev) flushPendingSafeWord();
+                                return !prev;
+                              });
+                            }}
+                            title='Chat room settings'
+                          >
+                            <IconGear size={21} />
+                          </button>
+                        )}
+                      </div>
+                      <QrCode url={inviteUrl} size={48} />
+                      {copied && (
+                        <span
+                          className={`${styles.copiedHint} ${copyState === 'fading' ? styles.copiedHintFading : ''}`}
+                        >
+                          copied to clipboard
+                        </span>
+                      )}
+                    </div>
+                    {onUpdateRoomSettings && (settingsOpen || roomSettings.safeWord || roomSettings.usernameModeEnabled) && (
+                      <div className={styles.inviteBoxSettings}>
+                        {!settingsOpen && (
+                          <div className={styles.activeSettings}>
+                            {roomSettings.safeWord && (
+                              <span className={styles.activeSettingTag}>Safe word agreement</span>
+                            )}
+                            {roomSettings.usernameModeEnabled && (
+                              <span className={styles.activeSettingTag}>Username mode</span>
+                            )}
+                          </div>
+                        )}
+                        {settingsOpen && (
+                          <div className={styles.settingsPanel}>
+                            <div className={styles.settingsRow}>
+                              <label className={styles.settingsLabel}>Safe word agreement</label>
+                              <OnOffToggle
+                                enabled={pendingSafeWordEnabled}
+                                onToggle={toggleSafeWord}
+                              />
+                            </div>
+                            {pendingSafeWordEnabled && (
+                              <>
+                                <input
+                                  type='password'
+                                  className={styles.settingsInput}
+                                  value={pendingSafeWord}
+                                  onChange={(event) => handleSafeWordInput(event.target.value)}
+                                  placeholder={roomSettings.safeWord ? 'Keep existing safe word' : 'Enter safe word'}
+                                />
+                                {applyingSafeWord && (
+                                  <p className={styles.settingsHint}>Applying...</p>
+                                )}
+                                {safeWordApplied && !applyingSafeWord && (
+                                  <p className={styles.settingsHintSuccess}>Safe word set</p>
+                                )}
+                              </>
+                            )}
+                            <div className={styles.settingsRow}>
+                              <label className={styles.settingsLabel}>Username mode</label>
+                              <OnOffToggle
+                                enabled={pendingUsernameMode}
+                                onToggle={toggleUsernameMode}
+                              />
+                            </div>
+                            {settingsError && <p className={styles.settingsError}>{settingsError}</p>}
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
-                  {copied && (
-                    <span
-                      className={`${styles.copiedHint} ${copyState === 'fading' ? styles.copiedHintFading : ''}`}
-                    >
-                      copied to clipboard
-                    </span>
-                  )}
                 </div>
-                <QrCode url={inviteUrl} />
-              </div>
-            </>
-          )}
-          {onUpdateRoomSettings && (
-            <div className={styles.settingsSection}>
-              {!settingsOpen && (roomSettings.safeWord || roomSettings.usernameModeEnabled) && (
-                <div className={styles.activeSettings}>
-                  {roomSettings.safeWord && (
-                    <span className={styles.activeSettingTag}>Safe word agreement</span>
-                  )}
-                  {roomSettings.usernameModeEnabled && (
-                    <span className={styles.activeSettingTag}>Username mode</span>
-                  )}
-                </div>
-              )}
-              {settingsOpen && (
-                <div className={styles.settingsPanel}>
-                  <div className={styles.settingsRow}>
-                    <label className={styles.settingsLabel}>Safe word agreement</label>
-                    <OnOffToggle
-                      enabled={pendingSafeWordEnabled}
-                      onToggle={toggleSafeWord}
-                    />
-                  </div>
-                  {pendingSafeWordEnabled && (
-                    <>
-                      <input
-                        type='password'
-                        className={styles.settingsInput}
-                        value={pendingSafeWord}
-                        onChange={(event) => handleSafeWordInput(event.target.value)}
-                        placeholder={roomSettings.safeWord ? 'Keep existing safe word' : 'Enter safe word'}
-                      />
-                      {applyingSafeWord && (
-                        <p className={styles.settingsHint}>Applying...</p>
-                      )}
-                      {safeWordApplied && !applyingSafeWord && (
-                        <p className={styles.settingsHintSuccess}>Safe word set</p>
-                      )}
-                    </>
-                  )}
-                  <div className={styles.settingsRow}>
-                    <label className={styles.settingsLabel}>Username mode</label>
-                    <OnOffToggle
-                      enabled={pendingUsernameMode}
-                      onToggle={toggleUsernameMode}
-                    />
-                  </div>
-                  {settingsError && <p className={styles.settingsError}>{settingsError}</p>}
-                </div>
-              )}
-            </div>
-          )}
+              </>
+            )}
+          </div>
+          <div className={styles.statusZone}>
+            <p className={styles.waitingStatus}>
+              Waiting for partner
+              <span className={styles.waitingDot}>.</span>
+              <span className={styles.waitingDot}>.</span>
+              <span className={styles.waitingDot}>.</span>
+            </p>
+          </div>
         </div>
       </div>
     );
@@ -1093,6 +1171,12 @@ function ChatView({
               text={msg.text}
               audioUrl={msg.audioUrl}
               durationMs={msg.durationMs}
+              waveform={msg.waveform}
+              fileUrl={msg.fileUrl}
+              fileName={msg.fileName}
+              fileMimeType={msg.fileMimeType}
+              fileSize={msg.fileSize}
+              transferProgress={msg.transferProgress}
               sender={msg.sender}
               displayName={msg.displayName}
               timestamp={msg.timestamp}
@@ -1101,16 +1185,36 @@ function ChatView({
               replyPreview={msg.replyPreview}
               onReplyClick={msg.replyTo ? () => scrollToMessage(msg.replyTo!) : undefined}
               onCopy={msg.kind === 'text' && msg.text ? () => handleCopyMessage(msg.text ?? '') : undefined}
-              onDownload={msg.kind === 'audio' && msg.audioUrl ? () => {
+              onDownload={(msg.kind === 'audio' && msg.audioUrl) || ((msg.kind === 'image' || msg.kind === 'file') && msg.fileUrl) ? () => {
+                const url = msg.audioUrl ?? msg.fileUrl;
+                if (!url) return;
                 const a = document.createElement('a');
-                a.href = msg.audioUrl!;
-                a.download = `voice-note-${Date.now()}.webm`;
+                a.href = url;
+                a.download = msg.fileName ?? `file-${Date.now()}`;
                 a.click();
               } : undefined}
+              autoPlay={autoPlayNextId === msg.id}
+              onAudioEnded={msg.kind === 'audio' && msg.audioUrl ? handleAudioEnded : undefined}
+              onImageClick={msg.kind === 'image' && msg.fileUrl && !msg.timed
+                ? () => setLightboxImage({ url: msg.fileUrl!, fileName: msg.fileName })
+                : undefined}
             />
           ))}
           <div ref={messagesEndRef} />
         </div>
+        {lightboxImage && (
+          <ImageLightbox
+            src={lightboxImage.url}
+            fileName={lightboxImage.fileName}
+            onClose={() => setLightboxImage(null)}
+            onDownload={() => {
+              const a = document.createElement('a');
+              a.href = lightboxImage.url;
+              a.download = lightboxImage.fileName ?? `image-${Date.now()}`;
+              a.click();
+            }}
+          />
+        )}
         <ChatInput
           onSend={handleSend}
           onTyping={onTyping}
@@ -1280,6 +1384,8 @@ function ChatView({
           isDeafened={voice.isDeafened}
           isE2eeEnabled={voice.isE2eeEnabled}
           isReconnecting={voice.isReconnecting}
+          e2eeDowngradeRequested={voice.e2eeDowngradeRequested}
+          e2eeDowngradeIncoming={voice.e2eeDowngradeIncoming}
           onStartCall={voice.startCall}
           onAcceptCall={voice.acceptCall}
           onDeclineCall={voice.declineCall}
@@ -1291,6 +1397,8 @@ function ChatView({
           onResetCallState={voice.resetCallState}
           onStartScreenShare={voice.startScreenShare}
           onStopScreenShare={voice.stopScreenShare}
+          onAcceptE2eeDowngrade={voice.acceptE2eeDowngrade}
+          onDeclineE2eeDowngrade={voice.declineE2eeDowngrade}
         />
       )}
       {voice.remoteScreenStream && (
@@ -1311,6 +1419,12 @@ function ChatView({
               text={msg.text}
               audioUrl={msg.audioUrl}
               durationMs={msg.durationMs}
+              waveform={msg.waveform}
+              fileUrl={msg.fileUrl}
+              fileName={msg.fileName}
+              fileMimeType={msg.fileMimeType}
+              fileSize={msg.fileSize}
+              transferProgress={msg.transferProgress}
               sender={msg.sender}
               displayName={msg.displayName}
               timestamp={msg.timestamp}
@@ -1318,16 +1432,31 @@ function ChatView({
               replyTo={msg.replyTo}
               replyPreview={msg.replyPreview}
               recentEmojis={recentEmojis}
-              onReact={isReady ? (emoji) => handleReact(msg.id, emoji) : undefined}
-              onReply={isReady ? () => { setReplyingTo(msg); setInputFocusTrigger(c => c + 1); } : undefined}
+              timed={msg.timed}
+              timedConsumed={msg.timedConsumed}
+              onTimedExpire={msg.timed ? handleTimedExpire : undefined}
+              onPlayOnceComplete={msg.timed && msg.kind === 'audio' ? handlePlayOnceComplete : undefined}
+              autoPlay={autoPlayNextId === msg.id}
+              onAudioEnded={msg.kind === 'audio' && msg.audioUrl ? handleAudioEnded : undefined}
+              onReact={isReady && !msg.timed ? (emoji) => handleReact(msg.id, emoji) : undefined}
+              onReply={isReady && !msg.timed ? () => { setReplyingTo(msg); setInputFocusTrigger(c => c + 1); } : undefined}
               onReplyClick={msg.replyTo ? () => scrollToMessage(msg.replyTo!) : undefined}
-              onCopy={msg.kind === 'text' && msg.text ? () => handleCopyMessage(msg.text ?? '') : undefined}
-              onDownload={msg.kind === 'audio' && msg.audioUrl ? () => {
-                const a = document.createElement('a');
-                a.href = msg.audioUrl!;
-                a.download = `voice-note-${Date.now()}.webm`;
-                a.click();
-              } : undefined}
+              onCopy={msg.kind === 'text' && msg.text && !msg.timed ? () => handleCopyMessage(msg.text ?? '') : undefined}
+              onDownload={
+                (msg.kind === 'audio' && msg.audioUrl && !(msg.timed && msg.sender === 'peer'))
+                || ((msg.kind === 'image' || msg.kind === 'file') && msg.fileUrl && !(msg.timed && msg.sender === 'peer'))
+                ? () => {
+                  const url = msg.audioUrl ?? msg.fileUrl;
+                  if (!url) return;
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = msg.fileName ?? `file-${Date.now()}.webm`;
+                  a.click();
+                } : undefined
+              }
+              onImageClick={msg.kind === 'image' && msg.fileUrl && !msg.timed
+                ? () => setLightboxImage({ url: msg.fileUrl!, fileName: msg.fileName })
+                : undefined}
             />
           ))}
         {peerTyping && (
@@ -1353,13 +1482,19 @@ function ChatView({
       </div>
       {replyingTo && (
         <ReplyPreview
-          text={replyingTo.kind === 'audio' ? '(voice note)' : (replyingTo.text ?? '')}
+          text={
+            replyingTo.kind === 'audio' ? '(voice note)'
+            : replyingTo.kind === 'image' ? '(image)'
+            : replyingTo.kind === 'file' ? `(file: ${replyingTo.fileName ?? 'unknown'})`
+            : (replyingTo.text ?? '')
+          }
           displayName={replyingTo.displayName}
           onCancel={() => setReplyingTo(null)}
         />
       )}
       <ChatInput
         onSend={handleSend}
+        onSendTimed={handleSendTimed}
         onTyping={handleTyping}
         disabled={(usernameModeEnabled && !localUsername) || isPeerDisconnected}
         maxLength={MAX_MESSAGE_LENGTH}
@@ -1369,6 +1504,7 @@ function ChatView({
         recordingDuration={recordingDuration}
         onStartRecording={startVoiceNoteRecording}
         onStopRecording={stopVoiceNoteRecording}
+        onStopRecordingTimed={stopVoiceNoteRecordingTimed}
         onCancelRecording={cancelVoiceNoteRecording}
         voiceNoteError={voiceNoteError}
         voiceNoteSizeWarningSeconds={effectiveWarningSeconds}
@@ -1377,7 +1513,22 @@ function ChatView({
         previewAudioUrl={previewUrl}
         previewDurationMs={previewDurationMs}
         previewWaveform={previewWaveform}
+        onSendFile={handleSendFile}
+        fileError={fileError}
       />
+      {lightboxImage && (
+        <ImageLightbox
+          src={lightboxImage.url}
+          fileName={lightboxImage.fileName}
+          onClose={() => setLightboxImage(null)}
+          onDownload={() => {
+            const a = document.createElement('a');
+            a.href = lightboxImage.url;
+            a.download = lightboxImage.fileName ?? `image-${Date.now()}`;
+            a.click();
+          }}
+        />
+      )}
       {usernameModeEnabled && !localUsername && (
         <div className={styles.usernameModalBackdrop}>
           <form className={styles.usernameModal} onSubmit={submitUsername}>

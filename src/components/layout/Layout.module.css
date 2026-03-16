@@ -43,6 +43,12 @@
   top: 5px;
 }
 
+@media (max-width: 480px) {
+  .logoIcon {
+    display: none;
+  }
+}
+
 .logo:hover {
   text-decoration: none;
   color: var(--accent);
