@@ -30,6 +30,9 @@ export type VoiceSignal =
   | { kind: 'screen-share-start' }
   | { kind: 'screen-share-stop' }
   | { kind: 'e2ee-toggle'; e2ee: boolean }
+  | { kind: 'e2ee-downgrade-request' }
+  | { kind: 'e2ee-downgrade-accept' }
+  | { kind: 'e2ee-downgrade-decline' }
 
 export type CallState =
   | 'idle'
