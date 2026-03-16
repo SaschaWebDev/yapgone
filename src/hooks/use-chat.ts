@@ -22,6 +22,7 @@ import type { ReconnectingChatWebSocket } from '@/ws/reconnecting-client'
 import type { ClientMessage, ServerMessage } from '@/ws'
 import type { RatchetState, VoiceSignal } from '@/types'
 import { createRoom, buildWsUrl, buildInviteFragment } from '@/api'
+import { computeWaveform } from '@/utils'
 import type { RoomSettings } from '@/room-settings'
 import { DEFAULT_ROOM_SETTINGS, normalizeRoomSettings } from '@/room-settings'
 import {
@@ -29,6 +30,13 @@ import {
   VOICE_NOTE_ASSEMBLY_TIMEOUT_MS,
   VOICE_NOTE_CHUNK_BYTES,
   VOICE_NOTE_MAX_BYTES,
+  FILE_MAX_IMAGE_BYTES,
+  FILE_MAX_GENERAL_BYTES,
+  FILE_CHUNK_BYTES,
+  FILE_ASSEMBLY_TIMEOUT_MS,
+  FILE_MAX_CONCURRENT_TRANSFERS,
+  FILE_SEND_DELAY_MS,
+  IMAGE_MIME_TYPES,
 } from '@/constants'
 
 export type ChatPhase =
@@ -50,16 +58,24 @@ export interface MessageReaction {
 
 export interface ChatMessage {
   id: string
-  kind: 'text' | 'audio'
+  kind: 'text' | 'audio' | 'image' | 'file'
   text?: string
   audioUrl?: string
   durationMs?: number
+  fileUrl?: string
+  fileName?: string
+  fileMimeType?: string
+  fileSize?: number
   sender: 'self' | 'peer' | 'system'
   displayName?: string
   timestamp: number
   reactions: MessageReaction[]
   replyTo?: string
   replyPreview?: string
+  waveform?: readonly number[]
+  timed?: boolean
+  timedConsumed?: boolean
+  transferProgress?: number
 }
 
 const SALT = new TextEncoder().encode('yapgone-chat-root')
@@ -71,6 +87,8 @@ const DecryptedPayloadSchema = z.discriminatedUnion('kind', [
     content: z.string(),
     msgId: z.string().min(1).max(32).optional(),
     replyTo: z.string().min(1).max(32).optional(),
+    timed: z.boolean().optional(),
+    ts: z.number().optional(),
   }),
   z.object({
     kind: z.literal('voice-note-meta'),
@@ -79,6 +97,8 @@ const DecryptedPayloadSchema = z.discriminatedUnion('kind', [
     durationMs: z.number().int().nonnegative(),
     totalChunks: z.number().int().positive(),
     totalBytes: z.number().int().positive(),
+    timed: z.boolean().optional(),
+    ts: z.number().optional(),
   }),
   z.object({
     kind: z.literal('voice-note-chunk'),
@@ -90,6 +110,26 @@ const DecryptedPayloadSchema = z.discriminatedUnion('kind', [
     kind: z.literal('voice-note-complete'),
     noteId: z.string().min(1),
   }),
+  z.object({
+    kind: z.literal('file-meta'),
+    fileId: z.string().min(1),
+    fileName: z.string().min(1).max(255),
+    mimeType: z.string().min(1),
+    totalChunks: z.number().int().positive(),
+    totalBytes: z.number().int().positive(),
+    timed: z.boolean().optional(),
+    ts: z.number().optional(),
+  }),
+  z.object({
+    kind: z.literal('file-chunk'),
+    fileId: z.string().min(1),
+    index: z.number().int().nonnegative(),
+    data: z.string().min(1),
+  }),
+  z.object({
+    kind: z.literal('file-complete'),
+    fileId: z.string().min(1),
+  }),
   z.object({ kind: z.literal('voice-request') }),
   z.object({ kind: z.literal('voice-accept') }),
   z.object({ kind: z.literal('voice-decline') }),
@@ -100,6 +140,9 @@ const DecryptedPayloadSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('screen-share-start') }),
   z.object({ kind: z.literal('screen-share-stop') }),
   z.object({ kind: z.literal('e2ee-toggle'), e2ee: z.boolean() }),
+  z.object({ kind: z.literal('e2ee-downgrade-request') }),
+  z.object({ kind: z.literal('e2ee-downgrade-accept') }),
+  z.object({ kind: z.literal('e2ee-downgrade-decline') }),
   z.object({ kind: z.literal('username-set'), username: z.string().min(1).max(24) }),
   z.object({
     kind: z.literal('reaction'),
@@ -107,6 +150,7 @@ const DecryptedPayloadSchema = z.discriminatedUnion('kind', [
     emoji: z.string().min(1).max(8),
     action: z.enum(['add', 'remove']),
   }),
+  z.object({ kind: z.literal('timed-consumed'), noteId: z.string().min(1) }),
 ])
 
 type VoiceHandlerRef = RefObject<((signal: VoiceSignal) => void) | null>
@@ -118,6 +162,8 @@ type VoiceNoteMeta = {
   durationMs: number
   totalChunks: number
   totalBytes: number
+  timed?: boolean
+  ts?: number
 }
 
 type VoiceNoteChunk = {
@@ -134,6 +180,47 @@ type VoiceNoteComplete = {
 
 type VoiceNotePayload = VoiceNoteMeta | VoiceNoteChunk | VoiceNoteComplete
 
+type FileTransferMeta = {
+  kind: 'file-meta'
+  fileId: string
+  fileName: string
+  mimeType: string
+  totalChunks: number
+  totalBytes: number
+  timed?: boolean
+  ts?: number
+}
+
+type FileTransferChunk = {
+  kind: 'file-chunk'
+  fileId: string
+  index: number
+  data: string
+}
+
+type FileTransferComplete = {
+  kind: 'file-complete'
+  fileId: string
+}
+
+type FileTransferPayload = FileTransferMeta | FileTransferChunk | FileTransferComplete
+
+interface FileAssembly {
+  fileName: string
+  mimeType: string
+  totalChunks: number
+  totalBytes: number
+  receivedBytes: number
+  chunks: Map<number, Uint8Array>
+  createdAt: number
+  timed?: boolean
+  ts?: number
+}
+
+function fileMaxBytes(mimeType: string): number {
+  return IMAGE_MIME_TYPES.has(mimeType) ? FILE_MAX_IMAGE_BYTES : FILE_MAX_GENERAL_BYTES
+}
+
 interface VoiceNoteAssembly {
   mimeType: string
   durationMs: number
@@ -142,6 +229,8 @@ interface VoiceNoteAssembly {
   receivedBytes: number
   chunks: Map<number, Uint8Array>
   createdAt: number
+  timed?: boolean
+  ts?: number
 }
 
 function generateMessageId(): string {
@@ -168,12 +257,42 @@ export function _concatChunks(chunks: Uint8Array[]): Uint8Array {
   return output
 }
 
+export function _insertSorted(messages: ChatMessage[], msg: ChatMessage): ChatMessage[] {
+  const len = messages.length
+  const last = len > 0 ? messages[len - 1] : undefined
+  // Fast path: newer than last message — append (common case)
+  if (!last || msg.timestamp > last.timestamp ||
+    (msg.timestamp === last.timestamp && msg.id >= last.id)) {
+    return [...messages, msg]
+  }
+  // Slow path: binary search for insertion point
+  let lo = 0
+  let hi = len
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1
+    const m = messages[mid]
+    if (!m) { lo = mid + 1; continue }
+    const cmp = m.timestamp - msg.timestamp
+    if (cmp < 0 || (cmp === 0 && m.id < msg.id)) {
+      lo = mid + 1
+    } else {
+      hi = mid
+    }
+  }
+  const result = messages.slice()
+  result.splice(lo, 0, msg)
+  return result
+}
+
 function buildAudioMessage(
   sender: 'self' | 'peer',
   objectUrl: string,
   durationMs: number,
   displayName?: string,
   id?: string,
+  timed?: boolean,
+  timestamp?: number,
+  waveform?: readonly number[],
 ): ChatMessage {
   return {
     id: id ?? generateMessageId(),
@@ -182,8 +301,10 @@ function buildAudioMessage(
     durationMs,
     sender,
     displayName,
-    timestamp: Date.now(),
+    timestamp: timestamp ?? Date.now(),
     reactions: [],
+    timed: timed || undefined,
+    waveform,
   }
 }
 
@@ -192,6 +313,7 @@ function buildTextMessage(
   text: string,
   displayName?: string,
   id?: string,
+  timestamp?: number,
 ): ChatMessage {
   return {
     id: id ?? generateMessageId(),
@@ -199,8 +321,35 @@ function buildTextMessage(
     text,
     sender,
     displayName,
-    timestamp: Date.now(),
+    timestamp: timestamp ?? Date.now(),
     reactions: [],
+  }
+}
+
+function buildFileMessage(
+  sender: 'self' | 'peer',
+  kind: 'image' | 'file',
+  objectUrl: string,
+  fileName: string,
+  mimeType: string,
+  fileSize: number,
+  displayName?: string,
+  id?: string,
+  timed?: boolean,
+  timestamp?: number,
+): ChatMessage {
+  return {
+    id: id ?? generateMessageId(),
+    kind,
+    fileUrl: objectUrl,
+    fileName,
+    fileMimeType: mimeType,
+    fileSize,
+    sender,
+    displayName,
+    timestamp: timestamp ?? Date.now(),
+    reactions: [],
+    timed: timed || undefined,
   }
 }
 
@@ -228,6 +377,9 @@ function findReplyPreview(messages: ChatMessage[], replyTo: string): string | un
   const target = messages.find(m => m.id === replyTo)
   if (!target) return undefined
   if (target.kind === 'audio') return '(voice note)'
+  if (target.kind === 'image') return '(image)'
+  if (target.kind === 'file') return `(file: ${target.fileName ?? 'unknown'})`
+  if (target.timed) return '(timed message)'
   const text = target.text ?? ''
   return text.length > 80 ? text.slice(0, 80) + '...' : text
 }
@@ -262,9 +414,15 @@ export function useChatAsCreator(
   const typingSafetyRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const voiceNoteAssembliesRef = useRef<Map<string, VoiceNoteAssembly>>(new Map())
   const localAudioUrlsRef = useRef<Set<string>>(new Set())
+  const fileAssembliesRef = useRef<Map<string, FileAssembly>>(new Map())
+  const localFileUrlsRef = useRef<Set<string>>(new Set())
 
   const trackAudioUrl = useCallback((url: string) => {
     localAudioUrlsRef.current.add(url)
+  }, [])
+
+  const trackFileUrl = useCallback((url: string) => {
+    localFileUrlsRef.current.add(url)
   }, [])
 
   const setLocalUsernameAndNotify = useCallback(async (username: string) => {
@@ -323,6 +481,8 @@ export function useChatAsCreator(
         receivedBytes: 0,
         chunks: new Map(),
         createdAt: Date.now(),
+        timed: payload.timed || undefined,
+        ts: payload.ts,
       })
       return
     }
@@ -368,15 +528,126 @@ export function useChatAsCreator(
     const blob = new Blob([arrayBuffer], { type: assembly.mimeType })
     const objectUrl = URL.createObjectURL(blob)
     trackAudioUrl(objectUrl)
-    setMessages(prev => [...prev, buildAudioMessage(
+    const rcvNoteId = payload.noteId
+    setMessages(prev => _insertSorted(prev, buildAudioMessage(
       sender,
       objectUrl,
       assembly.durationMs,
       sender === 'peer' ? peerUsernameRef.current ?? undefined : localUsernameRef.current ?? undefined,
-      payload.noteId,
-    )])
+      rcvNoteId,
+      assembly.timed,
+      assembly.ts,
+    )))
+    void computeWaveform(blob).then(w => {
+      setMessages(prev => prev.map(m => m.id === rcvNoteId ? { ...m, waveform: w } : m))
+    })
     voiceNoteAssembliesRef.current.delete(payload.noteId)
   }, [cleanupVoiceNoteAssemblies, trackAudioUrl])
+
+  const cleanupFileAssemblies = useCallback(() => {
+    const now = Date.now()
+    for (const [fileId, assembly] of fileAssembliesRef.current) {
+      if (now - assembly.createdAt > FILE_ASSEMBLY_TIMEOUT_MS) {
+        fileAssembliesRef.current.delete(fileId)
+        setMessages(prev => prev.filter(m => m.id !== fileId))
+      }
+    }
+  }, [])
+
+  const onFilePayload = useCallback((payload: FileTransferPayload, sender: 'self' | 'peer') => {
+    cleanupFileAssemblies()
+    if (payload.kind === 'file-meta') {
+      if (fileAssembliesRef.current.size >= FILE_MAX_CONCURRENT_TRANSFERS) return
+      const maxBytes = fileMaxBytes(payload.mimeType)
+      if (payload.totalBytes > maxBytes) return
+      fileAssembliesRef.current.set(payload.fileId, {
+        fileName: payload.fileName,
+        mimeType: payload.mimeType,
+        totalChunks: payload.totalChunks,
+        totalBytes: payload.totalBytes,
+        receivedBytes: 0,
+        chunks: new Map(),
+        createdAt: Date.now(),
+        timed: payload.timed || undefined,
+        ts: payload.ts,
+      })
+      const msgKind = IMAGE_MIME_TYPES.has(payload.mimeType) ? 'image' as const : 'file' as const
+      setMessages(prev => _insertSorted(prev, {
+        ...buildFileMessage(
+          sender, msgKind, '', payload.fileName,
+          payload.mimeType, payload.totalBytes,
+          sender === 'peer' ? peerUsernameRef.current ?? undefined : localUsernameRef.current ?? undefined,
+          payload.fileId, payload.timed, payload.ts,
+        ),
+        transferProgress: 0,
+      }))
+      return
+    }
+
+    if (payload.kind === 'file-chunk') {
+      const assembly = fileAssembliesRef.current.get(payload.fileId)
+      if (!assembly) return
+      if (payload.index >= assembly.totalChunks) return
+      if (assembly.chunks.has(payload.index)) return
+      const chunk = fromBase64Url(payload.data)
+      const nextSize = assembly.receivedBytes + chunk.length
+      const maxBytes = fileMaxBytes(assembly.mimeType)
+      if (nextSize > maxBytes || nextSize > assembly.totalBytes) {
+        fileAssembliesRef.current.delete(payload.fileId)
+        setMessages(prev => prev.filter(m => m.id !== payload.fileId))
+        return
+      }
+      assembly.chunks.set(payload.index, chunk)
+      assembly.receivedBytes = nextSize
+      const progress = assembly.totalBytes > 0 ? nextSize / assembly.totalBytes : 0
+      setMessages(prev => prev.map(m =>
+        m.id === payload.fileId ? { ...m, transferProgress: progress } : m
+      ))
+      return
+    }
+
+    const assembly = fileAssembliesRef.current.get(payload.fileId)
+    if (!assembly) return
+    if (
+      assembly.chunks.size !== assembly.totalChunks ||
+      assembly.receivedBytes !== assembly.totalBytes
+    ) {
+      fileAssembliesRef.current.delete(payload.fileId)
+      setMessages(prev => prev.filter(m => m.id !== payload.fileId))
+      return
+    }
+
+    const orderedChunks: Uint8Array[] = []
+    for (let i = 0; i < assembly.totalChunks; i++) {
+      const chunk = assembly.chunks.get(i)
+      if (!chunk) {
+        fileAssembliesRef.current.delete(payload.fileId)
+        setMessages(prev => prev.filter(m => m.id !== payload.fileId))
+        return
+      }
+      orderedChunks.push(chunk)
+    }
+    const bytes = _concatChunks(orderedChunks)
+    const arrayBuffer = new ArrayBuffer(bytes.length)
+    new Uint8Array(arrayBuffer).set(bytes)
+    const blob = new Blob([arrayBuffer], { type: assembly.mimeType })
+    const objectUrl = URL.createObjectURL(blob)
+    trackFileUrl(objectUrl)
+    const msgKind = IMAGE_MIME_TYPES.has(assembly.mimeType) ? 'image' as const : 'file' as const
+    setMessages(prev => prev.map(m =>
+      m.id === payload.fileId ? {
+        ...buildFileMessage(
+          sender, msgKind, objectUrl, assembly.fileName,
+          assembly.mimeType, assembly.totalBytes,
+          sender === 'peer' ? peerUsernameRef.current ?? undefined : localUsernameRef.current ?? undefined,
+          payload.fileId, assembly.timed, assembly.ts,
+        ),
+        reactions: m.reactions,
+        transferProgress: undefined,
+      } : m
+    ))
+    fileAssembliesRef.current.delete(payload.fileId)
+  }, [cleanupFileAssemblies, trackFileUrl])
 
   const cleanup = useCallback(() => {
     if (cleanedUpRef.current) return
@@ -390,10 +661,15 @@ export function useChatAsCreator(
       ratchetRef.current = null
     }
     voiceNoteAssembliesRef.current.clear()
+    fileAssembliesRef.current.clear()
     for (const url of localAudioUrlsRef.current) {
       URL.revokeObjectURL(url)
     }
     localAudioUrlsRef.current.clear()
+    for (const url of localFileUrlsRef.current) {
+      URL.revokeObjectURL(url)
+    }
+    localFileUrlsRef.current.clear()
     if (wsRef.current) {
       const ws = wsRef.current
       wsRef.current = null
@@ -555,15 +831,17 @@ export function useChatAsCreator(
             const id = data.msgId ?? generateMessageId()
             const content = data.content
             const replyToId = data.replyTo
+            const peerTs = data.ts
             setMessages(prev => {
               const replyPreview = replyToId
                 ? findReplyPreview(prev, replyToId)
                 : undefined
-              return [...prev, {
-                ...buildTextMessage('peer', content, peerUsernameRef.current ?? undefined, id),
+              return _insertSorted(prev, {
+                ...buildTextMessage('peer', content, peerUsernameRef.current ?? undefined, id, peerTs),
                 replyTo: replyToId,
                 replyPreview,
-              }]
+                timed: data.timed || undefined,
+              })
             })
           } else if (data.kind === 'reaction') {
             const { msgId, emoji, action } = data
@@ -579,6 +857,16 @@ export function useChatAsCreator(
             data.kind === 'voice-note-complete'
           ) {
             onVoiceNotePayload(data, 'peer')
+          } else if (
+            data.kind === 'file-meta' ||
+            data.kind === 'file-chunk' ||
+            data.kind === 'file-complete'
+          ) {
+            onFilePayload(data, 'peer')
+          } else if (data.kind === 'timed-consumed') {
+            setMessages(prev => prev.map(msg =>
+              msg.id === data.noteId ? { ...msg, timedConsumed: true } : msg
+            ))
           } else {
             voiceHandlerRef?.current?.(data)
           }
@@ -613,14 +901,16 @@ export function useChatAsCreator(
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const sendMessage = useCallback(async (text: string, replyTo?: string) => {
+  const sendMessage = useCallback(async (text: string, replyTo?: string, timed?: boolean) => {
     if (!ratchetRef.current || !wsRef.current) return
     const trimmed = text.slice(0, MAX_MESSAGE_LENGTH)
     if (!trimmed) return
 
     const msgId = generateMessageId()
-    const payloadObj: Record<string, unknown> = { kind: 'text', content: trimmed, msgId }
+    const ts = Date.now()
+    const payloadObj: Record<string, unknown> = { kind: 'text', content: trimmed, msgId, ts }
     if (replyTo) payloadObj.replyTo = replyTo
+    if (timed) payloadObj.timed = true
 
     const plaintext = new TextEncoder().encode(JSON.stringify(payloadObj))
     const { state: newState, header, iv, ciphertext } = await ratchetEncrypt(
@@ -634,11 +924,12 @@ export function useChatAsCreator(
 
     setMessages(prev => {
       const replyPreview = replyTo ? findReplyPreview(prev, replyTo) : undefined
-      return [...prev, {
-        ...buildTextMessage('self', trimmed, localUsernameRef.current ?? undefined, msgId),
+      return _insertSorted(prev, {
+        ...buildTextMessage('self', trimmed, localUsernameRef.current ?? undefined, msgId, ts),
         replyTo,
         replyPreview,
-      }]
+        timed: timed || undefined,
+      })
     })
   }, [])
 
@@ -659,6 +950,10 @@ export function useChatAsCreator(
     setMessages(prev => applyReaction(prev, msgId, emoji, action, true))
   }, [])
 
+  const removeTimedMessage = useCallback((targetMsgId: string) => {
+    setMessages(prev => prev.filter(msg => msg.id !== targetMsgId))
+  }, [])
+
   const sendVoiceSignal = useCallback(async (signal: VoiceSignal) => {
     if (!ratchetRef.current || !wsRef.current) return
     const plaintext = new TextEncoder().encode(JSON.stringify(signal))
@@ -675,12 +970,14 @@ export function useChatAsCreator(
     blob: Blob,
     durationMs: number,
     mimeType: string,
+    timed?: boolean,
   ) => {
     if (!ratchetRef.current || !wsRef.current) return
     const bytes = new Uint8Array(await blob.arrayBuffer())
     if (bytes.length === 0 || bytes.length > VOICE_NOTE_MAX_BYTES) return
 
     const noteId = generateMessageId()
+    const ts = Date.now()
     const chunks = _chunkBytes(bytes, VOICE_NOTE_CHUNK_BYTES)
     const meta: VoiceNoteMeta = {
       kind: 'voice-note-meta',
@@ -689,6 +986,8 @@ export function useChatAsCreator(
       durationMs,
       totalChunks: chunks.length,
       totalBytes: bytes.length,
+      timed: timed || undefined,
+      ts,
     }
     const messages: VoiceNotePayload[] = [
       meta,
@@ -715,14 +1014,107 @@ export function useChatAsCreator(
 
     const objectUrl = URL.createObjectURL(blob)
     trackAudioUrl(objectUrl)
-    setMessages(prev => [...prev, buildAudioMessage(
+    setMessages(prev => _insertSorted(prev, buildAudioMessage(
       'self',
       objectUrl,
       durationMs,
       localUsernameRef.current ?? undefined,
       noteId,
-    )])
+      timed,
+      ts,
+    )))
+    void computeWaveform(blob).then(w => {
+      setMessages(prev => prev.map(m => m.id === noteId ? { ...m, waveform: w } : m))
+    })
   }, [trackAudioUrl])
+
+  const sendFile = useCallback(async (
+    file: File,
+    timed?: boolean,
+  ) => {
+    if (!ratchetRef.current || !wsRef.current) return
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    const maxBytes = fileMaxBytes(file.type)
+    if (bytes.length === 0 || bytes.length > maxBytes) return
+
+    const fileId = generateMessageId()
+    const ts = Date.now()
+    const chunks = _chunkBytes(bytes, FILE_CHUNK_BYTES)
+    const meta: FileTransferMeta = {
+      kind: 'file-meta',
+      fileId,
+      fileName: file.name,
+      mimeType: file.type || 'application/octet-stream',
+      totalChunks: chunks.length,
+      totalBytes: bytes.length,
+      timed: timed || undefined,
+      ts,
+    }
+    const payloads: FileTransferPayload[] = [
+      meta,
+      ...chunks.map((chunk, index): FileTransferChunk => ({
+        kind: 'file-chunk',
+        fileId,
+        index,
+        data: toBase64Url(chunk),
+      })),
+      { kind: 'file-complete', fileId },
+    ]
+
+    // Show local message immediately with progress
+    const objectUrl = URL.createObjectURL(file)
+    trackFileUrl(objectUrl)
+    const msgKind = IMAGE_MIME_TYPES.has(file.type) ? 'image' as const : 'file' as const
+    setMessages(prev => _insertSorted(prev, {
+      ...buildFileMessage(
+        'self', msgKind, objectUrl, file.name,
+        file.type || 'application/octet-stream', bytes.length,
+        localUsernameRef.current ?? undefined,
+        fileId, timed, ts,
+      ),
+      transferProgress: 0,
+    }))
+
+    for (let i = 0; i < payloads.length; i++) {
+      const message = payloads[i]
+      if (!message) continue
+      const plaintext = new TextEncoder().encode(JSON.stringify(message))
+      const { state: newState, header, iv, ciphertext } = await ratchetEncrypt(
+        ratchetRef.current,
+        plaintext,
+      )
+      ratchetRef.current = newState
+      const encPayload = toBase64Url(concatBytes(iv, ciphertext))
+      wsRef.current.send({ type: 'message', header, payload: encPayload })
+      // Update progress (skip meta and complete messages)
+      if (message.kind === 'file-chunk') {
+        const progress = (i) / (payloads.length - 1)
+        setMessages(prev => prev.map(m =>
+          m.id === fileId ? { ...m, transferProgress: progress } : m
+        ))
+      }
+      await new Promise(resolve => setTimeout(resolve, FILE_SEND_DELAY_MS))
+    }
+
+    // Mark transfer complete
+    setMessages(prev => prev.map(m =>
+      m.id === fileId ? { ...m, transferProgress: undefined } : m
+    ))
+  }, [trackFileUrl])
+
+  const sendTimedConsumed = useCallback(async (noteId: string) => {
+    if (!ratchetRef.current || !wsRef.current) return
+    const plaintext = new TextEncoder().encode(
+      JSON.stringify({ kind: 'timed-consumed', noteId }),
+    )
+    const { state: newState, header, iv, ciphertext } = await ratchetEncrypt(
+      ratchetRef.current,
+      plaintext,
+    )
+    ratchetRef.current = newState
+    const payload = toBase64Url(concatBytes(iv, ciphertext))
+    wsRef.current.send({ type: 'message', header, payload })
+  }, [])
 
   const sendTyping = useCallback((active: boolean) => {
     wsRef.current?.send({ type: 'typing', active })
@@ -752,9 +1144,12 @@ export function useChatAsCreator(
     inviteUrl,
     sendMessage,
     sendReaction,
+    removeTimedMessage,
+    sendTimedConsumed,
     sendTyping,
     sendVoiceSignal,
     sendVoiceNote,
+    sendFile,
     endChat,
     endChatForAll,
     roomSettings,
@@ -793,9 +1188,15 @@ export function useChatAsJoiner(
   const typingSafetyRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const voiceNoteAssembliesRef = useRef<Map<string, VoiceNoteAssembly>>(new Map())
   const localAudioUrlsRef = useRef<Set<string>>(new Set())
+  const fileAssembliesRef = useRef<Map<string, FileAssembly>>(new Map())
+  const localFileUrlsRef = useRef<Set<string>>(new Set())
 
   const trackAudioUrl = useCallback((url: string) => {
     localAudioUrlsRef.current.add(url)
+  }, [])
+
+  const trackFileUrl = useCallback((url: string) => {
+    localFileUrlsRef.current.add(url)
   }, [])
 
   const setLocalUsernameAndNotify = useCallback(async (username: string) => {
@@ -837,6 +1238,8 @@ export function useChatAsJoiner(
         receivedBytes: 0,
         chunks: new Map(),
         createdAt: Date.now(),
+        timed: payload.timed || undefined,
+        ts: payload.ts,
       })
       return
     }
@@ -882,15 +1285,126 @@ export function useChatAsJoiner(
     const noteBlob = new Blob([arrayBuffer], { type: assembly.mimeType })
     const objectUrl = URL.createObjectURL(noteBlob)
     trackAudioUrl(objectUrl)
-    setMessages(prev => [...prev, buildAudioMessage(
+    const rcvNoteId2 = payload.noteId
+    setMessages(prev => _insertSorted(prev, buildAudioMessage(
       sender,
       objectUrl,
       assembly.durationMs,
       sender === 'peer' ? peerUsernameRef.current ?? undefined : localUsernameRef.current ?? undefined,
-      payload.noteId,
-    )])
+      rcvNoteId2,
+      assembly.timed,
+      assembly.ts,
+    )))
+    void computeWaveform(noteBlob).then(w => {
+      setMessages(prev => prev.map(m => m.id === rcvNoteId2 ? { ...m, waveform: w } : m))
+    })
     voiceNoteAssembliesRef.current.delete(payload.noteId)
   }, [cleanupVoiceNoteAssemblies, trackAudioUrl])
+
+  const cleanupFileAssemblies = useCallback(() => {
+    const now = Date.now()
+    for (const [fileId, assembly] of fileAssembliesRef.current) {
+      if (now - assembly.createdAt > FILE_ASSEMBLY_TIMEOUT_MS) {
+        fileAssembliesRef.current.delete(fileId)
+        setMessages(prev => prev.filter(m => m.id !== fileId))
+      }
+    }
+  }, [])
+
+  const onFilePayload = useCallback((payload: FileTransferPayload, sender: 'self' | 'peer') => {
+    cleanupFileAssemblies()
+    if (payload.kind === 'file-meta') {
+      if (fileAssembliesRef.current.size >= FILE_MAX_CONCURRENT_TRANSFERS) return
+      const maxBytes = fileMaxBytes(payload.mimeType)
+      if (payload.totalBytes > maxBytes) return
+      fileAssembliesRef.current.set(payload.fileId, {
+        fileName: payload.fileName,
+        mimeType: payload.mimeType,
+        totalChunks: payload.totalChunks,
+        totalBytes: payload.totalBytes,
+        receivedBytes: 0,
+        chunks: new Map(),
+        createdAt: Date.now(),
+        timed: payload.timed || undefined,
+        ts: payload.ts,
+      })
+      const msgKind = IMAGE_MIME_TYPES.has(payload.mimeType) ? 'image' as const : 'file' as const
+      setMessages(prev => _insertSorted(prev, {
+        ...buildFileMessage(
+          sender, msgKind, '', payload.fileName,
+          payload.mimeType, payload.totalBytes,
+          sender === 'peer' ? peerUsernameRef.current ?? undefined : localUsernameRef.current ?? undefined,
+          payload.fileId, payload.timed, payload.ts,
+        ),
+        transferProgress: 0,
+      }))
+      return
+    }
+
+    if (payload.kind === 'file-chunk') {
+      const assembly = fileAssembliesRef.current.get(payload.fileId)
+      if (!assembly) return
+      if (payload.index >= assembly.totalChunks) return
+      if (assembly.chunks.has(payload.index)) return
+      const chunk = fromBase64Url(payload.data)
+      const nextSize = assembly.receivedBytes + chunk.length
+      const maxBytes = fileMaxBytes(assembly.mimeType)
+      if (nextSize > maxBytes || nextSize > assembly.totalBytes) {
+        fileAssembliesRef.current.delete(payload.fileId)
+        setMessages(prev => prev.filter(m => m.id !== payload.fileId))
+        return
+      }
+      assembly.chunks.set(payload.index, chunk)
+      assembly.receivedBytes = nextSize
+      const progress = assembly.totalBytes > 0 ? nextSize / assembly.totalBytes : 0
+      setMessages(prev => prev.map(m =>
+        m.id === payload.fileId ? { ...m, transferProgress: progress } : m
+      ))
+      return
+    }
+
+    const assembly = fileAssembliesRef.current.get(payload.fileId)
+    if (!assembly) return
+    if (
+      assembly.chunks.size !== assembly.totalChunks ||
+      assembly.receivedBytes !== assembly.totalBytes
+    ) {
+      fileAssembliesRef.current.delete(payload.fileId)
+      setMessages(prev => prev.filter(m => m.id !== payload.fileId))
+      return
+    }
+
+    const orderedChunks: Uint8Array[] = []
+    for (let i = 0; i < assembly.totalChunks; i++) {
+      const chunk = assembly.chunks.get(i)
+      if (!chunk) {
+        fileAssembliesRef.current.delete(payload.fileId)
+        setMessages(prev => prev.filter(m => m.id !== payload.fileId))
+        return
+      }
+      orderedChunks.push(chunk)
+    }
+    const bytes = _concatChunks(orderedChunks)
+    const arrayBuffer2 = new ArrayBuffer(bytes.length)
+    new Uint8Array(arrayBuffer2).set(bytes)
+    const fileBlob = new Blob([arrayBuffer2], { type: assembly.mimeType })
+    const objectUrl = URL.createObjectURL(fileBlob)
+    trackFileUrl(objectUrl)
+    const msgKind = IMAGE_MIME_TYPES.has(assembly.mimeType) ? 'image' as const : 'file' as const
+    setMessages(prev => prev.map(m =>
+      m.id === payload.fileId ? {
+        ...buildFileMessage(
+          sender, msgKind, objectUrl, assembly.fileName,
+          assembly.mimeType, assembly.totalBytes,
+          sender === 'peer' ? peerUsernameRef.current ?? undefined : localUsernameRef.current ?? undefined,
+          payload.fileId, assembly.timed, assembly.ts,
+        ),
+        reactions: m.reactions,
+        transferProgress: undefined,
+      } : m
+    ))
+    fileAssembliesRef.current.delete(payload.fileId)
+  }, [cleanupFileAssemblies, trackFileUrl])
 
   const cleanup = useCallback(() => {
     if (cleanedUpRef.current) return
@@ -904,10 +1418,15 @@ export function useChatAsJoiner(
       ratchetRef.current = null
     }
     voiceNoteAssembliesRef.current.clear()
+    fileAssembliesRef.current.clear()
     for (const url of localAudioUrlsRef.current) {
       URL.revokeObjectURL(url)
     }
     localAudioUrlsRef.current.clear()
+    for (const url of localFileUrlsRef.current) {
+      URL.revokeObjectURL(url)
+    }
+    localFileUrlsRef.current.clear()
     if (wsRef.current) {
       const ws = wsRef.current
       wsRef.current = null
@@ -1056,15 +1575,17 @@ export function useChatAsJoiner(
             const id = data.msgId ?? generateMessageId()
             const content = data.content
             const replyToId = data.replyTo
+            const peerTs = data.ts
             setMessages(prev => {
               const replyPreview = replyToId
                 ? findReplyPreview(prev, replyToId)
                 : undefined
-              return [...prev, {
-                ...buildTextMessage('peer', content, peerUsernameRef.current ?? undefined, id),
+              return _insertSorted(prev, {
+                ...buildTextMessage('peer', content, peerUsernameRef.current ?? undefined, id, peerTs),
                 replyTo: replyToId,
                 replyPreview,
-              }]
+                timed: data.timed || undefined,
+              })
             })
           } else if (data.kind === 'reaction') {
             const { msgId, emoji, action } = data
@@ -1080,6 +1601,16 @@ export function useChatAsJoiner(
             data.kind === 'voice-note-complete'
           ) {
             onVoiceNotePayload(data, 'peer')
+          } else if (
+            data.kind === 'file-meta' ||
+            data.kind === 'file-chunk' ||
+            data.kind === 'file-complete'
+          ) {
+            onFilePayload(data, 'peer')
+          } else if (data.kind === 'timed-consumed') {
+            setMessages(prev => prev.map(msg =>
+              msg.id === data.noteId ? { ...msg, timedConsumed: true } : msg
+            ))
           } else {
             voiceHandlerRef?.current?.(data)
           }
@@ -1114,14 +1645,16 @@ export function useChatAsJoiner(
     }
   }, [roomId, creatorPubKeyB64]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const sendMessage = useCallback(async (text: string, replyTo?: string) => {
+  const sendMessage = useCallback(async (text: string, replyTo?: string, timed?: boolean) => {
     if (!ratchetRef.current || !wsRef.current) return
     const trimmed = text.slice(0, MAX_MESSAGE_LENGTH)
     if (!trimmed) return
 
     const msgId = generateMessageId()
-    const payloadObj: Record<string, unknown> = { kind: 'text', content: trimmed, msgId }
+    const ts = Date.now()
+    const payloadObj: Record<string, unknown> = { kind: 'text', content: trimmed, msgId, ts }
     if (replyTo) payloadObj.replyTo = replyTo
+    if (timed) payloadObj.timed = true
 
     const plaintext = new TextEncoder().encode(JSON.stringify(payloadObj))
     const { state: newState, header, iv, ciphertext } = await ratchetEncrypt(
@@ -1135,11 +1668,12 @@ export function useChatAsJoiner(
 
     setMessages(prev => {
       const replyPreview = replyTo ? findReplyPreview(prev, replyTo) : undefined
-      return [...prev, {
-        ...buildTextMessage('self', trimmed, localUsernameRef.current ?? undefined, msgId),
+      return _insertSorted(prev, {
+        ...buildTextMessage('self', trimmed, localUsernameRef.current ?? undefined, msgId, ts),
         replyTo,
         replyPreview,
-      }]
+        timed: timed || undefined,
+      })
     })
   }, [])
 
@@ -1160,6 +1694,10 @@ export function useChatAsJoiner(
     setMessages(prev => applyReaction(prev, msgId, emoji, action, true))
   }, [])
 
+  const removeTimedMessage = useCallback((targetMsgId: string) => {
+    setMessages(prev => prev.filter(msg => msg.id !== targetMsgId))
+  }, [])
+
   const sendVoiceSignal = useCallback(async (signal: VoiceSignal) => {
     if (!ratchetRef.current || !wsRef.current) return
     const plaintext = new TextEncoder().encode(JSON.stringify(signal))
@@ -1176,12 +1714,14 @@ export function useChatAsJoiner(
     blob: Blob,
     durationMs: number,
     mimeType: string,
+    timed?: boolean,
   ) => {
     if (!ratchetRef.current || !wsRef.current) return
     const bytes = new Uint8Array(await blob.arrayBuffer())
     if (bytes.length === 0 || bytes.length > VOICE_NOTE_MAX_BYTES) return
 
     const noteId = generateMessageId()
+    const ts = Date.now()
     const chunks = _chunkBytes(bytes, VOICE_NOTE_CHUNK_BYTES)
     const meta: VoiceNoteMeta = {
       kind: 'voice-note-meta',
@@ -1190,6 +1730,8 @@ export function useChatAsJoiner(
       durationMs,
       totalChunks: chunks.length,
       totalBytes: bytes.length,
+      timed: timed || undefined,
+      ts,
     }
     const messages: VoiceNotePayload[] = [
       meta,
@@ -1216,14 +1758,104 @@ export function useChatAsJoiner(
 
     const objectUrl = URL.createObjectURL(blob)
     trackAudioUrl(objectUrl)
-    setMessages(prev => [...prev, buildAudioMessage(
+    setMessages(prev => _insertSorted(prev, buildAudioMessage(
       'self',
       objectUrl,
       durationMs,
       localUsernameRef.current ?? undefined,
       noteId,
-    )])
+      timed,
+      ts,
+    )))
+    void computeWaveform(blob).then(w => {
+      setMessages(prev => prev.map(m => m.id === noteId ? { ...m, waveform: w } : m))
+    })
   }, [trackAudioUrl])
+
+  const sendFile = useCallback(async (
+    file: File,
+    timed?: boolean,
+  ) => {
+    if (!ratchetRef.current || !wsRef.current) return
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    const maxBytes = fileMaxBytes(file.type)
+    if (bytes.length === 0 || bytes.length > maxBytes) return
+
+    const fileId = generateMessageId()
+    const ts = Date.now()
+    const chunks = _chunkBytes(bytes, FILE_CHUNK_BYTES)
+    const meta: FileTransferMeta = {
+      kind: 'file-meta',
+      fileId,
+      fileName: file.name,
+      mimeType: file.type || 'application/octet-stream',
+      totalChunks: chunks.length,
+      totalBytes: bytes.length,
+      timed: timed || undefined,
+      ts,
+    }
+    const payloads: FileTransferPayload[] = [
+      meta,
+      ...chunks.map((chunk, index): FileTransferChunk => ({
+        kind: 'file-chunk',
+        fileId,
+        index,
+        data: toBase64Url(chunk),
+      })),
+      { kind: 'file-complete', fileId },
+    ]
+
+    const fileObjectUrl = URL.createObjectURL(file)
+    trackFileUrl(fileObjectUrl)
+    const msgKind = IMAGE_MIME_TYPES.has(file.type) ? 'image' as const : 'file' as const
+    setMessages(prev => _insertSorted(prev, {
+      ...buildFileMessage(
+        'self', msgKind, fileObjectUrl, file.name,
+        file.type || 'application/octet-stream', bytes.length,
+        localUsernameRef.current ?? undefined,
+        fileId, timed, ts,
+      ),
+      transferProgress: 0,
+    }))
+
+    for (let i = 0; i < payloads.length; i++) {
+      const message = payloads[i]
+      if (!message) continue
+      const plaintext = new TextEncoder().encode(JSON.stringify(message))
+      const { state: newState, header, iv, ciphertext } = await ratchetEncrypt(
+        ratchetRef.current,
+        plaintext,
+      )
+      ratchetRef.current = newState
+      const encPayload = toBase64Url(concatBytes(iv, ciphertext))
+      wsRef.current.send({ type: 'message', header, payload: encPayload })
+      if (message.kind === 'file-chunk') {
+        const progress = (i) / (payloads.length - 1)
+        setMessages(prev => prev.map(m =>
+          m.id === fileId ? { ...m, transferProgress: progress } : m
+        ))
+      }
+      await new Promise(resolve => setTimeout(resolve, FILE_SEND_DELAY_MS))
+    }
+
+    setMessages(prev => prev.map(m =>
+      m.id === fileId ? { ...m, transferProgress: undefined } : m
+    ))
+  }, [trackFileUrl])
+
+  const sendTimedConsumed = useCallback(async (noteId: string) => {
+    if (!ratchetRef.current || !wsRef.current) return
+    const plaintext = new TextEncoder().encode(
+      JSON.stringify({ kind: 'timed-consumed', noteId }),
+    )
+    const { state: newState, header, iv, ciphertext } = await ratchetEncrypt(
+      ratchetRef.current,
+      plaintext,
+    )
+    ratchetRef.current = newState
+    const payload = toBase64Url(concatBytes(iv, ciphertext))
+    wsRef.current.send({ type: 'message', header, payload })
+  }, [])
 
   const sendTyping = useCallback((active: boolean) => {
     wsRef.current?.send({ type: 'typing', active })
@@ -1253,9 +1885,12 @@ export function useChatAsJoiner(
     inviteUrl: null,
     sendMessage,
     sendReaction,
+    removeTimedMessage,
+    sendTimedConsumed,
     sendTyping,
     sendVoiceSignal,
     sendVoiceNote,
+    sendFile,
     endChat,
     endChatForAll,
     roomSettings: resolvedRoomSettings,
