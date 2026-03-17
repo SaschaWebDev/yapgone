@@ -1,5 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { IconMic, IconPause, IconPlay, IconTrash, IconViewOnce, IconAttachment } from '../icons';
+import { IconMic, IconPause, IconPlay, IconTrash, IconViewOnce, IconEmoji } from '../icons';
+import { AttachmentMenu } from '../attachment-menu';
+import { EmojiFullPicker } from '../emoji-picker';
 import styles from './ChatInput.module.css';
 
 interface ChatInputProps {
@@ -8,6 +10,8 @@ interface ChatInputProps {
   onTyping: (active: boolean) => void;
   disabled: boolean;
   maxLength: number;
+  recentEmojis?: readonly string[];
+  onTrackEmoji?: (emoji: string) => void;
   focusTrigger?: number;
   isRecording?: boolean;
   isSendingVoiceNote?: boolean;
@@ -25,6 +29,8 @@ interface ChatInputProps {
   previewWaveform?: number[];
   onSendFile?: (file: File) => void;
   fileError?: string | null;
+  onOpenPollCreator?: () => void;
+  onOpenPhotoComposer?: () => void;
 }
 
 const TYPING_TIMEOUT = 5_000;
@@ -65,6 +71,10 @@ export function ChatInput({
   previewWaveform,
   onSendFile,
   fileError,
+  onOpenPollCreator,
+  onOpenPhotoComposer,
+  recentEmojis,
+  onTrackEmoji,
 }: ChatInputProps) {
   const [text, setText] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -79,6 +89,16 @@ export function ChatInput({
   const animFrameRef = useRef<number | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachBtnRef = useRef<HTMLButtonElement>(null);
+  const emojiBtnRef = useRef<HTMLButtonElement>(null);
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+
+  const handleEmojiSelect = useCallback((emoji: string) => {
+    setEmojiPickerOpen(false);
+    onSend(emoji);
+    onTrackEmoji?.(emoji);
+  }, [onSend, onTrackEmoji]);
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -506,15 +526,46 @@ export function ChatInput({
               tabIndex={-1}
             />
             <button
+              ref={attachBtnRef}
               className={styles.attachButton}
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => (onOpenPollCreator || onOpenPhotoComposer) ? setAttachMenuOpen(prev => !prev) : fileInputRef.current?.click()}
               disabled={disabled}
-              aria-label='Attach file'
+              aria-label='Attach'
               type='button'
             >
-              <IconAttachment size={22} />
+              <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
             </button>
+            {attachMenuOpen && attachBtnRef.current && (
+              <AttachmentMenu
+                anchorRect={attachBtnRef.current.getBoundingClientRect()}
+                onFileSelect={() => { fileInputRef.current?.click(); setAttachMenuOpen(false) }}
+                onPhotoSelect={onOpenPhotoComposer ? () => { onOpenPhotoComposer(); setAttachMenuOpen(false) } : undefined}
+                onPollCreate={onOpenPollCreator ? () => { onOpenPollCreator(); setAttachMenuOpen(false) } : undefined}
+                onClose={() => setAttachMenuOpen(false)}
+              />
+            )}
           </>
+        )}
+        <button
+          ref={emojiBtnRef}
+          className={styles.emojiButton}
+          onClick={() => setEmojiPickerOpen(prev => !prev)}
+          disabled={disabled}
+          aria-label="Emoji"
+          type="button"
+        >
+          <IconEmoji size={22} />
+        </button>
+        {emojiPickerOpen && emojiBtnRef.current && (
+          <EmojiFullPicker
+            onSelect={handleEmojiSelect}
+            onClose={() => setEmojiPickerOpen(false)}
+            recentEmojis={recentEmojis ?? []}
+            anchorRect={emojiBtnRef.current.getBoundingClientRect()}
+          />
         )}
         <textarea
           ref={textareaRef}

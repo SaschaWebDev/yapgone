@@ -3,7 +3,7 @@ import { computeWaveform } from '@/utils';
 import chatBubbleStyles from '@/components/ui/message-bubble/MessageBubble.module.css';
 import { useChatAsCreator, useChatAsJoiner, useVoiceCall, useNotifications, useLocalChatSettings, useInactivityTimer, useRecentEmojis } from '@/hooks';
 import type { VoiceSignal } from '@/types';
-import type { ChatMessage } from '@/hooks/use-chat';
+import type { ChatMessage, GalleryImage } from '@/hooks/use-chat';
 import type { ConnectionQuality } from '@/components/ui/status-badge/StatusBadge';
 import type { RoomSettings } from '@/room-settings';
 import {
@@ -27,6 +27,8 @@ import {
   ReplyPreview,
   InactivityCountdown,
   ImageLightbox,
+  PollCreator,
+  PhotoComposer,
 } from '@/components';
 import {
   MAX_MESSAGE_LENGTH,
@@ -62,7 +64,7 @@ export function Chat({ roomId, creatorPubKey, roomSettings }: ChatProps) {
   const [safeWordPassed, setSafeWordPassed] = useState(false);
 
   if (isCreator) {
-    return <CreatorChat initialRoomSettings={normalizedSettings} />;
+    return <CreatorChat roomId={roomId} initialRoomSettings={normalizedSettings} />;
   }
 
   if (normalizedSettings.safeWord && !safeWordPassed) {
@@ -161,7 +163,7 @@ function SafeWordGate({
   );
 }
 
-function CreatorChat({ initialRoomSettings }: { initialRoomSettings: RoomSettings }) {
+function CreatorChat({ roomId, initialRoomSettings }: { roomId: string; initialRoomSettings: RoomSettings }) {
   const voiceHandlerRef = useRef<((signal: VoiceSignal) => void) | null>(null);
   const {
     phase,
@@ -172,6 +174,9 @@ function CreatorChat({ initialRoomSettings }: { initialRoomSettings: RoomSetting
     sendReaction,
     removeTimedMessage,
     sendTimedConsumed,
+    sendPoll,
+    sendPollVote,
+    sendGallery,
     sendTyping,
     sendVoiceSignal,
     sendVoiceNote,
@@ -186,7 +191,7 @@ function CreatorChat({ initialRoomSettings }: { initialRoomSettings: RoomSetting
     setLocalUsername,
     mediaKeyRaw,
     error,
-  } = useChatAsCreator(voiceHandlerRef, initialRoomSettings);
+  } = useChatAsCreator(roomId, voiceHandlerRef, initialRoomSettings);
 
   const voice = useVoiceCall({
     sendSignal: sendVoiceSignal,
@@ -209,6 +214,9 @@ function CreatorChat({ initialRoomSettings }: { initialRoomSettings: RoomSetting
       onTyping={sendTyping}
       onSendVoiceNote={sendVoiceNote}
       onSendFile={sendFile}
+      onSendPoll={sendPoll}
+      onPollVote={sendPollVote}
+      onSendGallery={sendGallery}
       onEnd={endChat}
       onEndForAll={endChatForAll}
       roomSettings={roomSettings}
@@ -240,6 +248,9 @@ function JoinerChat({
     sendReaction,
     removeTimedMessage,
     sendTimedConsumed,
+    sendPoll,
+    sendPollVote,
+    sendGallery,
     sendTyping,
     sendVoiceSignal,
     sendVoiceNote,
@@ -276,6 +287,9 @@ function JoinerChat({
       onTyping={sendTyping}
       onSendVoiceNote={sendVoiceNote}
       onSendFile={sendFile}
+      onSendPoll={sendPoll}
+      onPollVote={sendPollVote}
+      onSendGallery={sendGallery}
       onEnd={endChat}
       onEndForAll={endChatForAll}
       roomSettings={roomSettings}
@@ -343,6 +357,9 @@ interface ChatViewProps {
   onSendVoiceNote: (blob: Blob, durationMs: number, mimeType: string, timed?: boolean) => Promise<void>;
   onSendFile: (file: File, timed?: boolean) => Promise<void>;
   onSendTimedConsumed: (noteId: string) => Promise<void>;
+  onSendPoll: (question: string, questionEmoji: string, options: Array<{ text: string; emoji: string }>, allowMultiple: boolean) => Promise<void>;
+  onPollVote: (pollId: string, optionIndices: number[]) => Promise<void>;
+  onSendGallery: (files: File[], caption?: string, timed?: boolean) => Promise<void>;
   onEnd: () => void;
   onEndForAll: () => void;
   roomSettings: RoomSettings;
@@ -367,6 +384,9 @@ function ChatView({
   onSendVoiceNote,
   onSendFile,
   onSendTimedConsumed,
+  onSendPoll,
+  onPollVote,
+  onSendGallery,
   onEnd,
   onEndForAll,
   roomSettings,
@@ -410,6 +430,9 @@ function ChatView({
   const [fileError, setFileError] = useState<string | null>(null);
   const [autoPlayNextId, setAutoPlayNextId] = useState<string | null>(null);
   const [lightboxImage, setLightboxImage] = useState<{ url: string; fileName?: string } | null>(null);
+  const [pollCreatorOpen, setPollCreatorOpen] = useState(false);
+  const [photoComposerOpen, setPhotoComposerOpen] = useState(false);
+  const [galleryLightbox, setGalleryLightbox] = useState<{ images: GalleryImage[]; index: number } | null>(null);
   const isAtBottomRef = useRef(true);
   const timedModeRef = useRef(false);
   const safeWordDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -483,6 +506,21 @@ function ChatView({
     setReplyingTo(null);
   }, [onSend, replyingTo]);
 
+  const handleSendPoll = useCallback(async (
+    question: string,
+    questionEmoji: string,
+    options: Array<{ text: string; emoji: string }>,
+    allowMultiple: boolean,
+  ) => {
+    await onSendPoll(question, questionEmoji, options, allowMultiple);
+    setPollCreatorOpen(false);
+  }, [onSendPoll]);
+
+  const handleSendGallery = useCallback(async (files: File[], caption?: string, timed?: boolean) => {
+    await onSendGallery(files, caption, timed);
+    setPhotoComposerOpen(false);
+  }, [onSendGallery]);
+
   const handleSendFile = useCallback((file: File) => {
     setFileError(null);
     const maxBytes = IMAGE_MIME_TYPES.has(file.type) ? FILE_MAX_IMAGE_BYTES : FILE_MAX_GENERAL_BYTES;
@@ -498,6 +536,10 @@ function ChatView({
     onSendFile(file)
       .catch(() => setFileError('Failed to send file'));
   }, [onSendFile]);
+
+  const handleGalleryImageClick = useCallback((gallery: GalleryImage[], index: number) => {
+    setGalleryLightbox({ images: gallery, index });
+  }, []);
 
   const handleCopyMessage = useCallback(async (text: string) => {
     try {
@@ -1198,10 +1240,31 @@ function ChatView({
               onImageClick={msg.kind === 'image' && msg.fileUrl && !msg.timed
                 ? () => setLightboxImage({ url: msg.fileUrl!, fileName: msg.fileName })
                 : undefined}
+              gallery={msg.gallery}
+              onGalleryImageClick={msg.kind === 'gallery' && msg.gallery
+                ? (index: number) => handleGalleryImageClick(msg.gallery!, index)
+                : undefined}
+              pollId={msg.pollId}
+              pollQuestion={msg.pollQuestion}
+              pollEmoji={msg.pollEmoji}
+              pollOptions={msg.pollOptions}
+              pollAllowMultiple={msg.pollAllowMultiple}
+              pollMyVotes={msg.pollMyVotes}
             />
           ))}
           <div ref={messagesEndRef} />
         </div>
+        {galleryLightbox && (
+          <ImageLightbox
+            src={galleryLightbox.images[galleryLightbox.index]?.fileUrl ?? ''}
+            fileName={galleryLightbox.images[galleryLightbox.index]?.fileName}
+            galleryImages={galleryLightbox.images
+              .filter((img): img is GalleryImage & { fileUrl: string } => Boolean(img.fileUrl))
+              .map(img => ({ url: img.fileUrl, fileName: img.fileName }))}
+            initialIndex={galleryLightbox.index}
+            onClose={() => setGalleryLightbox(null)}
+          />
+        )}
         {lightboxImage && (
           <ImageLightbox
             src={lightboxImage.url}
@@ -1457,6 +1520,17 @@ function ChatView({
               onImageClick={msg.kind === 'image' && msg.fileUrl && !msg.timed
                 ? () => setLightboxImage({ url: msg.fileUrl!, fileName: msg.fileName })
                 : undefined}
+              gallery={msg.gallery}
+              onGalleryImageClick={msg.kind === 'gallery' && msg.gallery && !msg.timed
+                ? (index: number) => handleGalleryImageClick(msg.gallery!, index)
+                : undefined}
+              pollId={msg.pollId}
+              pollQuestion={msg.pollQuestion}
+              pollEmoji={msg.pollEmoji}
+              pollOptions={msg.pollOptions}
+              pollAllowMultiple={msg.pollAllowMultiple}
+              pollMyVotes={msg.pollMyVotes}
+              onPollVote={isReady ? onPollVote : undefined}
             />
           ))}
         {peerTyping && (
@@ -1486,6 +1560,8 @@ function ChatView({
             replyingTo.kind === 'audio' ? '(voice note)'
             : replyingTo.kind === 'image' ? '(image)'
             : replyingTo.kind === 'file' ? `(file: ${replyingTo.fileName ?? 'unknown'})`
+            : replyingTo.kind === 'poll' ? '(poll)'
+            : replyingTo.kind === 'gallery' ? '(photo gallery)'
             : (replyingTo.text ?? '')
           }
           displayName={replyingTo.displayName}
@@ -1515,7 +1591,38 @@ function ChatView({
         previewWaveform={previewWaveform}
         onSendFile={handleSendFile}
         fileError={fileError}
+        onOpenPollCreator={() => setPollCreatorOpen(true)}
+        onOpenPhotoComposer={() => setPhotoComposerOpen(true)}
+        recentEmojis={recentEmojis}
+        onTrackEmoji={trackEmoji}
       />
+      {pollCreatorOpen && (
+        <PollCreator
+          onSend={handleSendPoll}
+          onClose={() => setPollCreatorOpen(false)}
+          recentEmojis={recentEmojis}
+          onTrackEmoji={trackEmoji}
+        />
+      )}
+      {photoComposerOpen && (
+        <PhotoComposer
+          onSend={handleSendGallery}
+          onClose={() => setPhotoComposerOpen(false)}
+          recentEmojis={recentEmojis}
+          onTrackEmoji={trackEmoji}
+        />
+      )}
+      {galleryLightbox && (
+        <ImageLightbox
+          src={galleryLightbox.images[galleryLightbox.index]?.fileUrl ?? ''}
+          fileName={galleryLightbox.images[galleryLightbox.index]?.fileName}
+          galleryImages={galleryLightbox.images
+            .filter((img): img is GalleryImage & { fileUrl: string } => Boolean(img.fileUrl))
+            .map(img => ({ url: img.fileUrl, fileName: img.fileName }))}
+          initialIndex={galleryLightbox.index}
+          onClose={() => setGalleryLightbox(null)}
+        />
+      )}
       {lightboxImage && (
         <ImageLightbox
           src={lightboxImage.url}
