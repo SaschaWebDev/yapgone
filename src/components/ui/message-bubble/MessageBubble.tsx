@@ -1,14 +1,15 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { formatMessage } from '@/utils/format-message'
+import { isEmojiOnly } from '@/utils'
 import { EmojiQuickPick, EmojiFullPicker } from '../emoji-picker'
-import type { MessageReaction } from '@/hooks/use-chat'
+import type { MessageReaction, PollOption, GalleryImage } from '@/hooks/use-chat'
 import { TIMED_MESSAGE_TTL_MS, TIMED_MESSAGE_FADEOUT_MS, TIMED_VOICE_FALLBACK_TTL_MS } from '@/constants'
 import styles from './MessageBubble.module.css'
 
 type PickerMode = 'closed' | 'compact' | 'expanded'
 
 interface MessageBubbleProps {
-  kind?: 'text' | 'audio' | 'image' | 'file'
+  kind?: 'text' | 'audio' | 'image' | 'file' | 'poll' | 'gallery'
   text?: string
   audioUrl?: string
   durationMs?: number
@@ -39,6 +40,15 @@ interface MessageBubbleProps {
   onAudioEnded?: (msgId: string) => void
   waveform?: readonly number[]
   onImageClick?: () => void
+  pollQuestion?: string
+  pollEmoji?: string
+  pollOptions?: PollOption[]
+  pollAllowMultiple?: boolean
+  pollMyVotes?: number[]
+  pollId?: string
+  onPollVote?: (pollId: string, optionIndices: number[]) => void
+  gallery?: GalleryImage[]
+  onGalleryImageClick?: (index: number) => void
 }
 
 function formatSeconds(seconds: number): string {
@@ -315,6 +325,175 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+function PollBubbleContent({
+  pollId,
+  pollEmoji,
+  pollQuestion,
+  pollOptions,
+  pollAllowMultiple,
+  pollMyVotes,
+  onPollVote,
+  isSelf,
+  timestamp,
+}: {
+  pollId: string
+  pollEmoji?: string
+  pollQuestion?: string
+  pollOptions: PollOption[]
+  pollAllowMultiple?: boolean
+  pollMyVotes?: number[]
+  onPollVote?: (pollId: string, optionIndices: number[]) => void
+  isSelf: boolean
+  timestamp: number
+}) {
+  const totalVotes = pollOptions.reduce((sum, o) => sum + o.votes, 0)
+  const myVotes = pollMyVotes ?? []
+
+  const handleOptionClick = useCallback((index: number) => {
+    if (!onPollVote) return
+    if (pollAllowMultiple) {
+      const next = myVotes.includes(index)
+        ? myVotes.filter(i => i !== index)
+        : [...myVotes, index]
+      onPollVote(pollId, next)
+    } else {
+      const next = myVotes.includes(index) ? [] : [index]
+      onPollVote(pollId, next)
+    }
+  }, [onPollVote, pollId, pollAllowMultiple, myVotes])
+
+  const time = new Date(timestamp).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+
+  return (
+    <div className={styles.pollContent}>
+      <div className={styles.pollHeader}>
+        {pollEmoji && <span className={styles.pollEmoji}>{pollEmoji}</span>}
+        <span className={styles.pollQuestion}>{pollQuestion}</span>
+      </div>
+      <span className={styles.pollMode}>
+        {pollAllowMultiple ? 'Multiple answers' : 'Single answer'}
+      </span>
+      <div className={styles.pollOptions}>
+        {pollOptions.map((opt, i) => {
+          const selected = myVotes.includes(i)
+          const pct = totalVotes > 0 ? (opt.votes / totalVotes) * 100 : 0
+          return (
+            <button
+              key={i}
+              type="button"
+              className={`${styles.pollOption}${selected ? ` ${styles.pollOptionSelected}` : ''}`}
+              onClick={() => handleOptionClick(i)}
+              disabled={!onPollVote}
+            >
+              <div
+                className={`${styles.pollProgressBar} ${isSelf ? styles.pollProgressBarSelf : styles.pollProgressBarPeer}`}
+                style={{ width: `${pct}%` }}
+              />
+              <span className={styles.pollIndicator}>
+                {pollAllowMultiple
+                  ? (selected ? '\u2611' : '\u2610')
+                  : (selected ? '\u25CF' : '\u25CB')
+                }
+              </span>
+              {opt.emoji && <span>{opt.emoji}</span>}
+              <span className={styles.pollOptionText}>{opt.text}</span>
+              <span className={styles.pollVoteCount}>{opt.votes}</span>
+            </button>
+          )
+        })}
+      </div>
+      <div className={styles.pollFooter}>
+        <span>{totalVotes} vote{totalVotes !== 1 ? 's' : ''}</span>
+        <time className={styles.time} dateTime={new Date(timestamp).toISOString()}>
+          {time}
+        </time>
+      </div>
+    </div>
+  )
+}
+
+function GalleryBubbleContent({
+  gallery,
+  caption,
+  isSelf,
+  timestamp,
+  timed,
+  onImageClick,
+}: {
+  gallery: GalleryImage[]
+  caption?: string
+  isSelf: boolean
+  timestamp: number
+  timed?: boolean
+  onImageClick?: (index: number) => void
+}) {
+  const time = new Date(timestamp).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+
+  const count = gallery.length
+  const layoutClass = count === 1 ? styles.galleryGrid1
+    : count === 2 ? styles.galleryGrid2
+    : count === 3 ? styles.galleryGrid3
+    : count === 4 ? styles.galleryGrid4
+    : styles.galleryGrid5
+
+  return (
+    <div className={styles.galleryContent}>
+      {timed && (
+        <span className={styles.timedBadge}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 16 14" />
+          </svg>
+          timed
+        </span>
+      )}
+      <div className={`${styles.galleryGrid} ${layoutClass}`}>
+        {gallery.map((img, i) => (
+          <div key={img.fileId} className={styles.galleryTile}>
+            {img.transferProgress !== undefined ? (
+              <div className={styles.galleryTileProgress}>
+                <div className={styles.transferProgressBar}>
+                  <div
+                    className={`${styles.transferProgressFill} ${isSelf ? styles.transferProgressFillSelf : styles.transferProgressFillPeer}`}
+                    style={{ width: `${Math.round(img.transferProgress * 100)}%` }}
+                  />
+                </div>
+                <span className={styles.transferText}>
+                  {Math.round(img.transferProgress * 100)}%
+                </span>
+              </div>
+            ) : img.fileUrl ? (
+              <img
+                className={styles.galleryTileImage}
+                src={img.fileUrl}
+                alt={img.fileName}
+                loading="lazy"
+                onClick={onImageClick && !timed ? () => onImageClick(i) : undefined}
+              />
+            ) : (
+              <div className={styles.galleryTileProgress}>
+                <span className={styles.transferText}>Waiting...</span>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      {caption && (
+        <p className={styles.galleryCaption}>{formatMessage(caption)}</p>
+      )}
+      <time className={styles.time} dateTime={new Date(timestamp).toISOString()}>
+        {time}
+      </time>
+    </div>
+  )
+}
+
 export function MessageBubble({
   kind = 'text',
   text,
@@ -347,6 +526,15 @@ export function MessageBubble({
   autoPlay,
   onAudioEnded,
   onImageClick,
+  pollQuestion,
+  pollEmoji,
+  pollOptions,
+  pollAllowMultiple,
+  pollMyVotes,
+  pollId,
+  onPollVote,
+  gallery,
+  onGalleryImageClick,
 }: MessageBubbleProps) {
   const [pickerMode, setPickerMode] = useState<PickerMode>('closed')
   const [copyDone, setCopyDone] = useState(false)
@@ -512,14 +700,15 @@ export function MessageBubble({
   const isSelf = sender === 'self'
   const grouped = groupReactions(reactions)
   const hasReactions = grouped.length > 0
+  const emojiOnly = kind === 'text' && !!text && isEmojiOnly(text)
 
   const anchorRect = emojiTriggerRef.current?.getBoundingClientRect()
 
   return (
-    <div className={`${styles.bubbleWrapper} ${isSelf ? styles.bubbleWrapperSelf : styles.bubbleWrapperPeer}${kind === 'audio' ? ` ${styles.bubbleWrapperAudio}` : ''}${kind === 'image' ? ` ${styles.bubbleWrapperImage}` : ''}${kind === 'file' ? ` ${styles.bubbleWrapperFile}` : ''}${hasReactions ? ` ${styles.bubbleWrapperHasReactions}` : ''}${fadingOut ? ` ${styles.timedFadingOut}` : ''}`} data-msg-id={msgId} role="listitem">
+    <div className={`${styles.bubbleWrapper} ${isSelf ? styles.bubbleWrapperSelf : styles.bubbleWrapperPeer}${kind === 'audio' ? ` ${styles.bubbleWrapperAudio}` : ''}${kind === 'image' ? ` ${styles.bubbleWrapperImage}` : ''}${kind === 'file' ? ` ${styles.bubbleWrapperFile}` : ''}${kind === 'gallery' ? ` ${styles.bubbleWrapperGallery}` : ''}${hasReactions ? ` ${styles.bubbleWrapperHasReactions}` : ''}${emojiOnly ? ` ${styles.bubbleWrapperEmoji}` : ''}${fadingOut ? ` ${styles.timedFadingOut}` : ''}`} data-msg-id={msgId} role="listitem">
       <div
         ref={bubbleRef}
-        className={`${styles.bubble} ${isSelf ? styles.self : styles.peer}${compact && kind !== 'audio' ? ` ${styles.compactActions}` : ''}${kind === 'audio' ? ` ${styles.audioActions}` : ''}${skipAnimation ? ` ${styles.noAnimation}` : ''}`}
+        className={`${styles.bubble} ${isSelf ? styles.self : styles.peer}${compact && kind !== 'audio' ? ` ${styles.compactActions}` : ''}${kind === 'audio' ? ` ${styles.audioActions}` : ''}${emojiOnly ? ` ${styles.emojiOnlyBubble}` : ''}${skipAnimation ? ` ${styles.noAnimation}` : ''}`}
         onDoubleClick={handleDoubleClick}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
@@ -623,6 +812,27 @@ export function MessageBubble({
               {time}
             </time>
           </div>
+        ) : kind === 'poll' && pollOptions && pollId ? (
+          <PollBubbleContent
+            pollId={pollId}
+            pollEmoji={pollEmoji}
+            pollQuestion={pollQuestion}
+            pollOptions={pollOptions}
+            pollAllowMultiple={pollAllowMultiple}
+            pollMyVotes={pollMyVotes}
+            onPollVote={onPollVote}
+            isSelf={isSelf}
+            timestamp={timestamp}
+          />
+        ) : kind === 'gallery' && gallery ? (
+          <GalleryBubbleContent
+            gallery={gallery}
+            caption={text}
+            isSelf={isSelf}
+            timestamp={timestamp}
+            timed={timed}
+            onImageClick={onGalleryImageClick}
+          />
         ) : (
           <>
             {timed && (
@@ -634,10 +844,18 @@ export function MessageBubble({
                 timed
               </span>
             )}
-            <p className={styles.text}>{text ? formatMessage(text) : ''}</p>
-            <time className={styles.time} dateTime={new Date(timestamp).toISOString()}>
-              {time}
-            </time>
+            <p className={`${styles.text}${emojiOnly ? ` ${styles.emojiOnly}` : ''}`}>{text ? formatMessage(text) : ''}</p>
+            {emojiOnly ? (
+              <span className={`${styles.emojiOnlyTimePill} ${isSelf ? styles.emojiOnlyTimePillSelf : styles.emojiOnlyTimePillPeer}`}>
+                <time className={styles.time} dateTime={new Date(timestamp).toISOString()}>
+                  {time}
+                </time>
+              </span>
+            ) : (
+              <time className={styles.time} dateTime={new Date(timestamp).toISOString()}>
+                {time}
+              </time>
+            )}
           </>
         )}
         {timed && (
@@ -648,7 +866,7 @@ export function MessageBubble({
             />
           </div>
         )}
-        {onCopy && kind === 'text' && (
+        {onCopy && kind === 'text' && !emojiOnly && (
           <button
             type="button"
             className={`${styles.copyButton} ${copyDone ? styles.copyDone : ''}`}
@@ -667,7 +885,7 @@ export function MessageBubble({
             )}
           </button>
         )}
-        {onDownload && (kind === 'audio' || kind === 'image' || kind === 'file') && (
+        {onDownload && (kind === 'audio' || kind === 'image' || kind === 'file' || kind === 'gallery') && (
           <button
             type="button"
             className={styles.downloadActionButton}

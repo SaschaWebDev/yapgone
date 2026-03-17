@@ -23,6 +23,19 @@
   margin-bottom: 0.7rem;
 }
 
+.bubbleWrapperEmoji {
+  min-width: auto;
+  max-width: calc(50% - 200px);
+}
+
+.bubbleWrapperEmoji.bubbleWrapperSelf {
+  margin-right: 200px;
+}
+
+.bubbleWrapperEmoji.bubbleWrapperPeer {
+  margin-left: 200px;
+}
+
 .bubble {
   position: relative;
   padding: 0.6rem 0.85rem;
@@ -44,10 +57,49 @@
   animation: slideInLeft 0.25s ease-out;
 }
 
+.emojiOnlyBubble.self,
+.emojiOnlyBubble.peer {
+  background: transparent;
+  padding: 0.2rem 0;
+}
+
 .text {
   font-size: 0.925rem;
   line-height: 1.5;
   white-space: pre-wrap;
+}
+
+.emojiOnly {
+  font-size: 3rem;
+  line-height: 1.2;
+}
+
+.emojiOnlyTimePill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.6rem;
+  border-radius: 11px;
+  line-height: 1;
+  float: right;
+  margin-top: 0.15rem;
+}
+
+.emojiOnlyTimePill .time {
+  opacity: 0.75;
+  display: inline;
+  margin-top: 0;
+}
+
+.emojiOnlyTimePillSelf {
+  background: var(--accent);
+  color: #fff;
+  border-bottom-right-radius: 1px;
+}
+
+.emojiOnlyTimePillPeer {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border-bottom-left-radius: 1px;
 }
 
 .displayName {
@@ -866,4 +918,262 @@
   text-transform: uppercase;
   letter-spacing: 0.03em;
   opacity: 0.55;
+}
+
+/* Poll styles */
+.pollContent {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.pollHeader {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+
+.pollEmoji {
+  font-size: 1.25rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.pollQuestion {
+  font-size: 0.925rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.pollMode {
+  font-size: 0.7rem;
+  font-style: italic;
+  opacity: 0.6;
+}
+
+.pollOptions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.pollOption {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  overflow: hidden;
+  width: 100%;
+  background: none;
+  font-family: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  transition: border-color 0.15s;
+}
+
+.self .pollOption {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.peer .pollOption {
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+
+.pollOption:disabled {
+  cursor: default;
+}
+
+.pollOptionSelected.pollOptionSelected {
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.peer .pollOptionSelected.pollOptionSelected {
+  border-color: var(--accent);
+}
+
+.pollIndicator {
+  font-size: 0.85rem;
+  width: 1rem;
+  flex-shrink: 0;
+  z-index: 1;
+  text-align: center;
+}
+
+.pollOptionText {
+  flex: 1;
+  z-index: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pollVoteCount {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.75rem;
+  opacity: 0.7;
+  z-index: 1;
+  flex-shrink: 0;
+}
+
+.pollProgressBar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: var(--radius-sm);
+  transition: width 0.3s ease;
+}
+
+.pollProgressBarSelf {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.pollProgressBarPeer {
+  background: rgba(var(--accent-rgb), 0.12);
+}
+
+.pollFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  opacity: 0.55;
+}
+
+/* Gallery styles */
+.bubbleWrapperGallery {
+  min-width: 16rem;
+  max-width: 70%;
+}
+
+.galleryContent {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.galleryGrid {
+  display: grid;
+  gap: 2px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.galleryGrid1 {
+  grid-template-columns: 1fr;
+}
+
+.galleryGrid2 {
+  grid-template-columns: 1fr 1fr;
+}
+
+.galleryGrid3 {
+  grid-template-columns: 1fr;
+  grid-template-rows: auto auto;
+}
+
+.galleryGrid3 .galleryTile:first-child {
+  grid-column: 1 / -1;
+}
+
+.galleryGrid3 .galleryTile:nth-child(2),
+.galleryGrid3 .galleryTile:nth-child(3) {
+  display: inline;
+}
+
+.galleryGrid3 {
+  grid-template-columns: 1fr 1fr;
+}
+
+.galleryGrid3 .galleryTile:first-child {
+  grid-column: 1 / -1;
+}
+
+.galleryGrid4 {
+  grid-template-columns: 1fr 1fr;
+}
+
+.galleryGrid5 {
+  grid-template-columns: 1fr 1fr;
+}
+
+.galleryGrid5 .galleryTile:nth-child(n+3) {
+  /* last 3 images: use 3 columns for bottom row */
+}
+
+.galleryGrid5 {
+  grid-template-columns: 6fr 6fr;
+  grid-template-rows: auto auto;
+}
+
+.galleryGrid5 .galleryTile:nth-child(3),
+.galleryGrid5 .galleryTile:nth-child(4),
+.galleryGrid5 .galleryTile:nth-child(5) {
+  grid-column: auto;
+}
+
+/* Override: 5-image layout = 2 top, 3 bottom via subgrid hack */
+.galleryGrid5 {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 2px;
+}
+
+.galleryGrid5 .galleryTile:nth-child(1),
+.galleryGrid5 .galleryTile:nth-child(2) {
+  grid-column: span 3;
+}
+
+.galleryGrid5 .galleryTile:nth-child(3),
+.galleryGrid5 .galleryTile:nth-child(4),
+.galleryGrid5 .galleryTile:nth-child(5) {
+  grid-column: span 2;
+}
+
+.galleryTile {
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: 1;
+}
+
+.galleryGrid1 .galleryTile {
+  aspect-ratio: auto;
+  max-height: 20rem;
+}
+
+.galleryTileImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  cursor: pointer;
+  transition: opacity 0.12s;
+}
+
+.galleryTileImage:hover {
+  opacity: 0.92;
+}
+
+.galleryTileProgress {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  width: 100%;
+  height: 100%;
+  min-height: 4rem;
+  background: rgba(var(--fg), 0.04);
+}
+
+.galleryCaption {
+  font-size: 0.925rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  margin-top: 0.2rem;
 }

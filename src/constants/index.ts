@@ -26,6 +26,9 @@ export const IMAGE_MIME_TYPES = new Set([
   'image/avif',
 ])
 
+export const GALLERY_MAX_IMAGES = 5
+export const GALLERY_IMAGE_ACCEPT = 'image/jpeg,image/png,image/gif,image/webp,image/bmp,image/avif'
+
 export const ROOM_INACTIVITY_TTL_MS = 30 * 60 * 1000 // 30 minutes
 
 export const MAX_SKIPPED_KEYS = 100
@@ -41,6 +44,10 @@ export const USERNAME_MAX_LENGTH = 24
 export const TIMED_MESSAGE_TTL_MS = 15_000
 export const TIMED_MESSAGE_FADEOUT_MS = 300
 export const TIMED_VOICE_FALLBACK_TTL_MS = 300_000
+
+export const POLL_MAX_OPTIONS = 20
+export const POLL_MAX_QUESTION_LENGTH = 500
+export const POLL_MAX_OPTION_LENGTH = 200
 
 export const DEFAULT_TITLE = 'yapgone'
 

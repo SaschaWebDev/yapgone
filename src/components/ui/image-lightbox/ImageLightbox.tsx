@@ -2,11 +2,18 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import styles from './ImageLightbox.module.css'
 
+interface GalleryEntry {
+  url: string
+  fileName?: string
+}
+
 interface ImageLightboxProps {
   src: string
   fileName?: string
   onClose: () => void
   onDownload?: () => void
+  galleryImages?: GalleryEntry[]
+  initialIndex?: number
 }
 
 const MIN_SCALE = 1
@@ -28,10 +35,18 @@ function clampTranslate(
   }
 }
 
-export function ImageLightbox({ src, fileName, onClose, onDownload }: ImageLightboxProps) {
+export function ImageLightbox({ src, fileName, onClose, onDownload, galleryImages, initialIndex = 0 }: ImageLightboxProps) {
+  const isGallery = galleryImages && galleryImages.length > 1
+  const [currentIndex, setCurrentIndex] = useState(isGallery ? initialIndex : 0)
   const [scale, setScale] = useState(1)
   const [translate, setTranslate] = useState({ x: 0, y: 0 })
   const [isDragging, setIsDragging] = useState(false)
+
+  const currentImage = isGallery
+    ? galleryImages[currentIndex]
+    : { url: src, fileName }
+  const currentSrc = currentImage?.url ?? src
+  const currentFileName = currentImage?.fileName ?? fileName
 
   const imgRef = useRef<HTMLImageElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -40,14 +55,33 @@ export function ImageLightbox({ src, fileName, onClose, onDownload }: ImageLight
   const lastPinchDistRef = useRef<number | null>(null)
   const pinchCenterRef = useRef<{ x: number; y: number } | null>(null)
 
-  // Escape key
+  const resetZoom = useCallback(() => {
+    setScale(1)
+    setTranslate({ x: 0, y: 0 })
+  }, [])
+
+  const goNext = useCallback(() => {
+    if (!isGallery) return
+    setCurrentIndex(prev => (prev + 1) % galleryImages.length)
+    resetZoom()
+  }, [isGallery, galleryImages, resetZoom])
+
+  const goPrev = useCallback(() => {
+    if (!isGallery) return
+    setCurrentIndex(prev => (prev - 1 + galleryImages.length) % galleryImages.length)
+    resetZoom()
+  }, [isGallery, galleryImages, resetZoom])
+
+  // Escape key + arrow keys
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
+      if (isGallery && e.key === 'ArrowRight') goNext()
+      if (isGallery && e.key === 'ArrowLeft') goPrev()
     }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
-  }, [onClose])
+  }, [onClose, isGallery, goNext, goPrev])
 
   // Body scroll lock
   useEffect(() => {
@@ -241,6 +275,13 @@ export function ImageLightbox({ src, fileName, onClose, onDownload }: ImageLight
     dragStartRef.current = null
   }, [])
 
+  const handleDownload = useCallback(() => {
+    const a = document.createElement('a')
+    a.href = currentSrc
+    a.download = currentFileName ?? `image-${Date.now()}`
+    a.click()
+  }, [currentSrc, currentFileName])
+
   const imageClasses = [
     styles.image,
     !isDragging ? styles.imageSmooth : '',
@@ -253,19 +294,22 @@ export function ImageLightbox({ src, fileName, onClose, onDownload }: ImageLight
   return createPortal(
     <div className={styles.overlay} onClick={handleOverlayClick}>
       <div className={styles.toolbar}>
-        {onDownload && (
-          <button
-            type="button"
-            className={styles.toolbarBtn}
-            onClick={onDownload}
-            aria-label="Download image"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 3v13m0 0l-4-4m4 4l4-4" />
-              <path d="M5 20h14" />
-            </svg>
-          </button>
+        {isGallery && (
+          <span className={styles.counter}>
+            {currentIndex + 1} of {galleryImages.length}
+          </span>
         )}
+        <button
+          type="button"
+          className={styles.toolbarBtn}
+          onClick={onDownload ?? handleDownload}
+          aria-label="Download image"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 3v13m0 0l-4-4m4 4l4-4" />
+            <path d="M5 20h14" />
+          </svg>
+        </button>
         <button
           type="button"
           className={styles.toolbarBtn}
@@ -278,6 +322,30 @@ export function ImageLightbox({ src, fileName, onClose, onDownload }: ImageLight
           </svg>
         </button>
       </div>
+      {isGallery && (
+        <>
+          <button
+            type="button"
+            className={`${styles.navButton} ${styles.navButtonLeft}`}
+            onClick={goPrev}
+            aria-label="Previous image"
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className={`${styles.navButton} ${styles.navButtonRight}`}
+            onClick={goNext}
+            aria-label="Next image"
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </button>
+        </>
+      )}
       <div
         ref={containerRef}
         className={styles.imageWrapper}
@@ -296,15 +364,15 @@ export function ImageLightbox({ src, fileName, onClose, onDownload }: ImageLight
         <img
           ref={imgRef}
           className={imageClasses}
-          src={src}
-          alt={fileName ?? 'Full size image'}
+          src={currentSrc}
+          alt={currentFileName ?? 'Full size image'}
           draggable={false}
           style={{
             transform: `translate(${translate.x}px, ${translate.y}px) scale(${scale})`,
           }}
         />
       </div>
-      {fileName && <span className={styles.fileName}>{fileName}</span>}
+      {currentFileName && <span className={styles.fileName}>{currentFileName}</span>}
     </div>,
     document.body,
   )

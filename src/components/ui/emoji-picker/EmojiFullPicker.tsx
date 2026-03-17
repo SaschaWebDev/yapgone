@@ -71,19 +71,28 @@ export function EmojiFullPicker({ onSelect, onClose, recentEmojis, anchorRect, a
     if (closest && closest !== activeTab) setActiveTab(closest)
   }, [activeTab])
 
-  // Calculate position
-  const pickerHeight = 352 // max-height 22rem ≈ 352px
-  const pickerWidth = 320  // 20rem
+  // Calculate position — read rem dynamically (global.css sets 150%)
+  const rem = parseFloat(getComputedStyle(document.documentElement).fontSize)
+  const pickerMaxH = 22 * rem   // matches CSS max-height: 22rem
+  const pickerW = 20 * rem      // matches CSS width: 20rem
+
   const spaceBelow = window.innerHeight - anchorRect.bottom - 8
   const spaceAbove = anchorRect.top - 8
-  const placeAbove = spaceBelow < pickerHeight && spaceAbove > spaceBelow
+  const placeAbove = spaceBelow < pickerMaxH && spaceAbove > spaceBelow
 
-  const top = placeAbove
-    ? Math.max(8, anchorRect.top - pickerHeight - 4)
-    : anchorRect.bottom + 4
-  const left = alignRight
-    ? Math.max(8, Math.min(anchorRect.right - pickerWidth, window.innerWidth - pickerWidth - 8))
-    : Math.max(8, Math.min(anchorRect.left, window.innerWidth - pickerWidth - 8))
+  const posStyle: React.CSSProperties = {}
+
+  if (placeAbove) {
+    posStyle.bottom = window.innerHeight - anchorRect.top + 4
+    if (spaceAbove < pickerMaxH) posStyle.maxHeight = spaceAbove
+  } else {
+    posStyle.top = anchorRect.bottom + 4
+    if (spaceBelow < pickerMaxH) posStyle.maxHeight = spaceBelow
+  }
+
+  posStyle.left = alignRight
+    ? Math.max(8, Math.min(anchorRect.right - pickerW, window.innerWidth - pickerW - 8))
+    : Math.max(8, Math.min(anchorRect.left, window.innerWidth - pickerW - 8))
 
   const showRecent = recentEmojis.length > 0 && !filtered
   const allTabs = showRecent
@@ -96,7 +105,7 @@ export function EmojiFullPicker({ onSelect, onClose, recentEmojis, anchorRect, a
       <div
         ref={pickerRef}
         className={styles.picker}
-        style={{ top, left }}
+        style={posStyle}
       >
         <div className={styles.searchWrapper}>
           <input

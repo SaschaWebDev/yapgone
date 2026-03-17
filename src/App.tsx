@@ -10,6 +10,7 @@ export function App() {
       <Layout>
         {route.mode === 'chat' ? (
           <Chat
+            key={route.roomId}
             roomId={route.roomId}
             creatorPubKey={route.creatorPubKey}
             roomSettings={route.roomSettings}
