@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { ChatPhase, ChatMessage } from '@/hooks/use-chat'
-import { _chunkBytes, _concatChunks, _insertSorted } from '@/hooks/use-chat'
+import { _chunkBytes, _concatChunks, _insertSorted, _buildPollMessage, _applyPollVote } from '@/hooks/use-chat'
 
 describe('useChat types', () => {
   it('ChatPhase includes all expected phases', () => {
@@ -178,5 +178,72 @@ describe('_insertSorted', () => {
     msgs = _insertSorted(msgs, makeMsg('d', 400))
     msgs = _insertSorted(msgs, makeMsg('b', 200))
     expect(msgs.map(m => m.id)).toEqual(['a', 'b', 'c', 'd'])
+  })
+})
+
+describe('_buildPollMessage', () => {
+  it('returns correct shape with votes at 0', () => {
+    const msg = _buildPollMessage(
+      'self', 'poll1', 'Favorite color?', '\u{1F4CA}',
+      [{ text: 'Red', emoji: '🔴' }, { text: 'Blue', emoji: '🔵' }],
+      false, 'alice', 1000,
+    )
+    expect(msg.kind).toBe('poll')
+    expect(msg.pollId).toBe('poll1')
+    expect(msg.pollQuestion).toBe('Favorite color?')
+    expect(msg.pollEmoji).toBe('\u{1F4CA}')
+    expect(msg.pollAllowMultiple).toBe(false)
+    expect(msg.pollMyVotes).toEqual([])
+    expect(msg.pollOptions).toHaveLength(2)
+    expect(msg.pollOptions![0]!.votes).toBe(0)
+    expect(msg.pollOptions![1]!.votes).toBe(0)
+    expect(msg.sender).toBe('self')
+    expect(msg.displayName).toBe('alice')
+    expect(msg.timestamp).toBe(1000)
+  })
+})
+
+describe('_applyPollVote', () => {
+  function makePollMessages(): ChatMessage[] {
+    return [_buildPollMessage(
+      'self', 'poll1', 'Q?', '\u{1F4CA}',
+      [{ text: 'A', emoji: '1️⃣' }, { text: 'B', emoji: '2️⃣' }, { text: 'C', emoji: '3️⃣' }],
+      false, undefined, 1000,
+    )]
+  }
+
+  it('single-select vote increments correct option', () => {
+    const msgs = makePollMessages()
+    const result = _applyPollVote(msgs, 'poll1', [1], true, [])
+    expect(result[0]!.pollOptions![0]!.votes).toBe(0)
+    expect(result[0]!.pollOptions![1]!.votes).toBe(1)
+    expect(result[0]!.pollOptions![2]!.votes).toBe(0)
+  })
+
+  it('multi-select vote increments multiple options', () => {
+    const msgs = makePollMessages()
+    const result = _applyPollVote(msgs, 'poll1', [0, 2], true, [])
+    expect(result[0]!.pollOptions![0]!.votes).toBe(1)
+    expect(result[0]!.pollOptions![1]!.votes).toBe(0)
+    expect(result[0]!.pollOptions![2]!.votes).toBe(1)
+  })
+
+  it('replacing previous votes decrements old and increments new', () => {
+    const msgs = makePollMessages()
+    // First vote for option 0
+    const after1 = _applyPollVote(msgs, 'poll1', [0], true, [])
+    expect(after1[0]!.pollOptions![0]!.votes).toBe(1)
+    // Change vote to option 2
+    const after2 = _applyPollVote(after1, 'poll1', [2], true, [0])
+    expect(after2[0]!.pollOptions![0]!.votes).toBe(0)
+    expect(after2[0]!.pollOptions![2]!.votes).toBe(1)
+  })
+
+  it('fromSelf updates pollMyVotes, fromPeer does not', () => {
+    const msgs = makePollMessages()
+    const selfResult = _applyPollVote(msgs, 'poll1', [1], true, [])
+    expect(selfResult[0]!.pollMyVotes).toEqual([1])
+    const peerResult = _applyPollVote(msgs, 'poll1', [2], false, [])
+    expect(peerResult[0]!.pollMyVotes).toEqual([])
   })
 })
