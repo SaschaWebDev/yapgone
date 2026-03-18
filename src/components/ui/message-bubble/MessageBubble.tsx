@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { formatMessage } from '@/utils/format-message'
 import { isEmojiOnly } from '@/utils'
 import { EmojiQuickPick, EmojiFullPicker } from '../emoji-picker'
+import { IconNotefade } from '../icons'
 import type { MessageReaction, PollOption, GalleryImage } from '@/hooks/use-chat'
 import { TIMED_MESSAGE_TTL_MS, TIMED_MESSAGE_FADEOUT_MS, TIMED_VOICE_FALLBACK_TTL_MS } from '@/constants'
 import styles from './MessageBubble.module.css'
@@ -9,7 +10,7 @@ import styles from './MessageBubble.module.css'
 type PickerMode = 'closed' | 'compact' | 'expanded'
 
 interface MessageBubbleProps {
-  kind?: 'text' | 'audio' | 'image' | 'file' | 'poll' | 'gallery'
+  kind?: 'text' | 'audio' | 'image' | 'file' | 'poll' | 'gallery' | 'notefade'
   text?: string
   audioUrl?: string
   durationMs?: number
@@ -47,6 +48,7 @@ interface MessageBubbleProps {
   pollMyVotes?: number[]
   pollId?: string
   onPollVote?: (pollId: string, optionIndices: number[]) => void
+  notefadeUrl?: string
   gallery?: GalleryImage[]
   onGalleryImageClick?: (index: number) => void
 }
@@ -198,29 +200,24 @@ function AudioPlayer({ src, durationMs, waveform, isSelf, timestamp, timed, onPl
     minute: '2-digit',
   })
 
-  const playButtonDisabled = isPlayOnce && hasPlayed && !isPlaying
+  const hidePlayButton = isPlayOnce && (isPlaying || hasPlayed)
 
   return (
     <div className={styles.audioPlayer}>
       <div className={styles.audioControls}>
         <audio ref={audioRef} src={src} preload="metadata" />
         <button
-          className={`${styles.playButton} ${isSelf ? styles.playButtonSelf : styles.playButtonPeer}${playButtonDisabled ? ` ${styles.playButtonDisabled}` : ''}`}
+          className={`${styles.playButton} ${isSelf ? styles.playButtonSelf : styles.playButtonPeer}${hidePlayButton ? ` ${styles.playButtonHidden}` : ''}`}
           onClick={togglePlay}
-          disabled={playButtonDisabled}
-          aria-label={isPlaying ? (isPlayOnce ? 'Playing' : 'Pause') : 'Play'}
+          aria-label={isPlaying ? 'Pause' : 'Play'}
+          disabled={hidePlayButton}
+          aria-hidden={hidePlayButton || undefined}
         >
           {isPlaying ? (
-            isPlayOnce ? (
-              <svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor">
-                <polygon points="7 3 21 12 7 21" />
-              </svg>
-            ) : (
-              <svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor">
-                <rect x="6" y="4" width="4" height="16" rx="1" />
-                <rect x="14" y="4" width="4" height="16" rx="1" />
-              </svg>
-            )
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor">
+              <rect x="6" y="4" width="4" height="16" rx="1" />
+              <rect x="14" y="4" width="4" height="16" rx="1" />
+            </svg>
           ) : (
             <svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor">
               <polygon points="7 3 21 12 7 21" />
@@ -533,6 +530,7 @@ export function MessageBubble({
   pollMyVotes,
   pollId,
   onPollVote,
+  notefadeUrl,
   gallery,
   onGalleryImageClick,
 }: MessageBubbleProps) {
@@ -705,7 +703,7 @@ export function MessageBubble({
   const anchorRect = emojiTriggerRef.current?.getBoundingClientRect()
 
   return (
-    <div className={`${styles.bubbleWrapper} ${isSelf ? styles.bubbleWrapperSelf : styles.bubbleWrapperPeer}${kind === 'audio' ? ` ${styles.bubbleWrapperAudio}` : ''}${kind === 'image' ? ` ${styles.bubbleWrapperImage}` : ''}${kind === 'file' ? ` ${styles.bubbleWrapperFile}` : ''}${kind === 'gallery' ? ` ${styles.bubbleWrapperGallery}` : ''}${hasReactions ? ` ${styles.bubbleWrapperHasReactions}` : ''}${emojiOnly ? ` ${styles.bubbleWrapperEmoji}` : ''}${fadingOut ? ` ${styles.timedFadingOut}` : ''}`} data-msg-id={msgId} role="listitem">
+    <div className={`${styles.bubbleWrapper} ${isSelf ? styles.bubbleWrapperSelf : styles.bubbleWrapperPeer}${kind === 'audio' ? ` ${styles.bubbleWrapperAudio}` : ''}${kind === 'image' ? ` ${styles.bubbleWrapperImage}` : ''}${kind === 'file' ? ` ${styles.bubbleWrapperFile}` : ''}${kind === 'gallery' ? ` ${styles.bubbleWrapperGallery}` : ''}${kind === 'notefade' ? ` ${styles.bubbleWrapperNotefade}` : ''}${hasReactions ? ` ${styles.bubbleWrapperHasReactions}` : ''}${emojiOnly ? ` ${styles.bubbleWrapperEmoji}` : ''}${fadingOut ? ` ${styles.timedFadingOut}` : ''}`} data-msg-id={msgId} role="listitem">
       <div
         ref={bubbleRef}
         className={`${styles.bubble} ${isSelf ? styles.self : styles.peer}${compact && kind !== 'audio' ? ` ${styles.compactActions}` : ''}${kind === 'audio' ? ` ${styles.audioActions}` : ''}${emojiOnly ? ` ${styles.emojiOnlyBubble}` : ''}${skipAnimation ? ` ${styles.noAnimation}` : ''}`}
@@ -833,6 +831,28 @@ export function MessageBubble({
             timed={timed}
             onImageClick={onGalleryImageClick}
           />
+        ) : kind === 'notefade' && notefadeUrl ? (
+          <>
+            <a
+              href={notefadeUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={styles.notefadeCard}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className={styles.notefadeCardHeader}>
+                <IconNotefade size={18} />
+                <span className={styles.notefadeCardTitle}>Self-destructing note</span>
+              </div>
+              <p className={styles.notefadeCardBody}>
+                Tap to open on notefade.com — this note will self-destruct after reading.
+              </p>
+              <span className={styles.notefadeCardDomain}>notefade.com</span>
+            </a>
+            <time className={styles.time} dateTime={new Date(timestamp).toISOString()}>
+              {time}
+            </time>
+          </>
         ) : (
           <>
             {timed && (

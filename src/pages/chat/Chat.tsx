@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useCallback, type FormEvent } from 'react';
 import { computeWaveform } from '@/utils';
+import { createNotefadeNote } from '@/api';
 import chatBubbleStyles from '@/components/ui/message-bubble/MessageBubble.module.css';
 import { useChatAsCreator, useChatAsJoiner, useVoiceCall, useNotifications, useLocalChatSettings, useInactivityTimer, useRecentEmojis } from '@/hooks';
 import type { VoiceSignal } from '@/types';
@@ -29,6 +30,7 @@ import {
   ImageLightbox,
   PollCreator,
   PhotoComposer,
+  NotefadeComposer,
 } from '@/components';
 import {
   MAX_MESSAGE_LENGTH,
@@ -171,6 +173,7 @@ function CreatorChat({ roomId, initialRoomSettings }: { roomId: string; initialR
     peerTyping,
     inviteUrl,
     sendMessage,
+    sendNotefade,
     sendReaction,
     removeTimedMessage,
     sendTimedConsumed,
@@ -217,6 +220,7 @@ function CreatorChat({ roomId, initialRoomSettings }: { roomId: string; initialR
       onSendPoll={sendPoll}
       onPollVote={sendPollVote}
       onSendGallery={sendGallery}
+      onSendNotefade={sendNotefade}
       onEnd={endChat}
       onEndForAll={endChatForAll}
       roomSettings={roomSettings}
@@ -245,6 +249,7 @@ function JoinerChat({
     messages,
     peerTyping,
     sendMessage,
+    sendNotefade,
     sendReaction,
     removeTimedMessage,
     sendTimedConsumed,
@@ -290,6 +295,7 @@ function JoinerChat({
       onSendPoll={sendPoll}
       onPollVote={sendPollVote}
       onSendGallery={sendGallery}
+      onSendNotefade={sendNotefade}
       onEnd={endChat}
       onEndForAll={endChatForAll}
       roomSettings={roomSettings}
@@ -360,6 +366,7 @@ interface ChatViewProps {
   onSendPoll: (question: string, questionEmoji: string, options: Array<{ text: string; emoji: string }>, allowMultiple: boolean) => Promise<void>;
   onPollVote: (pollId: string, optionIndices: number[]) => Promise<void>;
   onSendGallery: (files: File[], caption?: string, timed?: boolean) => Promise<void>;
+  onSendNotefade: (url: string) => Promise<void>;
   onEnd: () => void;
   onEndForAll: () => void;
   roomSettings: RoomSettings;
@@ -387,6 +394,7 @@ function ChatView({
   onSendPoll,
   onPollVote,
   onSendGallery,
+  onSendNotefade,
   onEnd,
   onEndForAll,
   roomSettings,
@@ -432,6 +440,7 @@ function ChatView({
   const [lightboxImage, setLightboxImage] = useState<{ url: string; fileName?: string } | null>(null);
   const [pollCreatorOpen, setPollCreatorOpen] = useState(false);
   const [photoComposerOpen, setPhotoComposerOpen] = useState(false);
+  const [notefadeComposerOpen, setNotefadeComposerOpen] = useState(false);
   const [galleryLightbox, setGalleryLightbox] = useState<{ images: GalleryImage[]; index: number } | null>(null);
   const isAtBottomRef = useRef(true);
   const timedModeRef = useRef(false);
@@ -520,6 +529,17 @@ function ChatView({
     await onSendGallery(files, caption, timed);
     setPhotoComposerOpen(false);
   }, [onSendGallery]);
+
+  const handleNotefadeSend = useCallback(async (noteText: string) => {
+    try {
+      const url = await createNotefadeNote(noteText);
+      await onSendNotefade(url);
+    } catch {
+      // silently fail — the note creation failed upstream
+    } finally {
+      setNotefadeComposerOpen(false);
+    }
+  }, [onSendNotefade]);
 
   const handleSendFile = useCallback((file: File) => {
     setFileError(null);
@@ -1244,6 +1264,7 @@ function ChatView({
               onGalleryImageClick={msg.kind === 'gallery' && msg.gallery
                 ? (index: number) => handleGalleryImageClick(msg.gallery!, index)
                 : undefined}
+              notefadeUrl={msg.notefadeUrl}
               pollId={msg.pollId}
               pollQuestion={msg.pollQuestion}
               pollEmoji={msg.pollEmoji}
@@ -1530,6 +1551,7 @@ function ChatView({
               pollOptions={msg.pollOptions}
               pollAllowMultiple={msg.pollAllowMultiple}
               pollMyVotes={msg.pollMyVotes}
+              notefadeUrl={msg.notefadeUrl}
               onPollVote={isReady ? onPollVote : undefined}
             />
           ))}
@@ -1593,6 +1615,7 @@ function ChatView({
         fileError={fileError}
         onOpenPollCreator={() => setPollCreatorOpen(true)}
         onOpenPhotoComposer={() => setPhotoComposerOpen(true)}
+        onOpenNotefadeComposer={() => setNotefadeComposerOpen(true)}
         recentEmojis={recentEmojis}
         onTrackEmoji={trackEmoji}
       />
@@ -1610,6 +1633,12 @@ function ChatView({
           onClose={() => setPhotoComposerOpen(false)}
           recentEmojis={recentEmojis}
           onTrackEmoji={trackEmoji}
+        />
+      )}
+      {notefadeComposerOpen && (
+        <NotefadeComposer
+          onSend={handleNotefadeSend}
+          onClose={() => setNotefadeComposerOpen(false)}
         />
       )}
       {galleryLightbox && (

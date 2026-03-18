@@ -74,7 +74,7 @@ export interface GalleryImage {
 
 export interface ChatMessage {
   id: string
-  kind: 'text' | 'audio' | 'image' | 'file' | 'poll' | 'gallery'
+  kind: 'text' | 'audio' | 'image' | 'file' | 'poll' | 'gallery' | 'notefade'
   text?: string
   audioUrl?: string
   durationMs?: number
@@ -99,6 +99,7 @@ export interface ChatMessage {
   pollAllowMultiple?: boolean
   pollMyVotes?: number[]
   gallery?: GalleryImage[]
+  notefadeUrl?: string
 }
 
 const SALT = new TextEncoder().encode('yapgone-chat-root')
@@ -211,6 +212,13 @@ const DecryptedPayloadSchema = z.discriminatedUnion('kind', [
     kind: z.literal('poll-vote'),
     pollId: z.string().min(1).max(32),
     optionIndices: z.array(z.number().int().nonnegative().max(19)).min(0).max(20),
+  }),
+  z.object({
+    kind: z.literal('notefade'),
+    url: z.string().url(),
+    msgId: z.string().min(1).max(32).optional(),
+    replyTo: z.string().min(1).max(32).optional(),
+    ts: z.number().optional(),
   }),
 ])
 
@@ -453,6 +461,24 @@ function buildFileMessage(
   }
 }
 
+function buildNotefadeMessage(
+  sender: 'self' | 'peer',
+  url: string,
+  displayName?: string,
+  id?: string,
+  timestamp?: number,
+): ChatMessage {
+  return {
+    id: id ?? generateMessageId(),
+    kind: 'notefade',
+    notefadeUrl: url,
+    sender,
+    displayName,
+    timestamp: timestamp ?? Date.now(),
+    reactions: [],
+  }
+}
+
 function applyReaction(
   messages: ChatMessage[],
   msgId: string,
@@ -481,6 +507,7 @@ function findReplyPreview(messages: ChatMessage[], replyTo: string): string | un
   if (target.kind === 'file') return `(file: ${target.fileName ?? 'unknown'})`
   if (target.kind === 'poll') return '(poll)'
   if (target.kind === 'gallery') return '(photo gallery)'
+  if (target.kind === 'notefade') return '(self-destructing note)'
   if (target.timed) return '(timed message)'
   const text = target.text ?? ''
   return text.length > 80 ? text.slice(0, 80) + '...' : text
@@ -1195,6 +1222,16 @@ export function useChatAsCreator(
             const previous = peerPollVotesRef.current.get(data.pollId) ?? []
             setMessages(prev => _applyPollVote(prev, data.pollId, data.optionIndices, false, previous))
             peerPollVotesRef.current.set(data.pollId, data.optionIndices)
+          } else if (data.kind === 'notefade') {
+            const id = data.msgId ?? generateMessageId()
+            setMessages(prev => {
+              const replyPreview = data.replyTo ? findReplyPreview(prev, data.replyTo) : undefined
+              return _insertSorted(prev, {
+                ...buildNotefadeMessage('peer', data.url, peerUsernameRef.current ?? undefined, id, data.ts),
+                replyTo: data.replyTo,
+                replyPreview,
+              })
+            })
           } else {
             voiceHandlerRef?.current?.(data)
           }
@@ -1259,6 +1296,25 @@ export function useChatAsCreator(
         timed: timed || undefined,
       })
     })
+  }, [])
+
+  const sendNotefade = useCallback(async (url: string) => {
+    if (!ratchetRef.current || !wsRef.current) return
+    const msgId = generateMessageId()
+    const ts = Date.now()
+    const plaintext = new TextEncoder().encode(JSON.stringify({
+      kind: 'notefade', url, msgId, ts,
+    }))
+    const { state: newState, header, iv, ciphertext } = await ratchetEncrypt(
+      ratchetRef.current,
+      plaintext,
+    )
+    ratchetRef.current = newState
+    const payload = toBase64Url(concatBytes(iv, ciphertext))
+    wsRef.current.send({ type: 'message', header, payload })
+    setMessages(prev => _insertSorted(prev, buildNotefadeMessage(
+      'self', url, localUsernameRef.current ?? undefined, msgId, ts,
+    )))
   }, [])
 
   const sendReaction = useCallback(async (msgId: string, emoji: string, action: 'add' | 'remove') => {
@@ -1623,6 +1679,7 @@ export function useChatAsCreator(
     sendReaction,
     removeTimedMessage,
     sendTimedConsumed,
+    sendNotefade,
     sendPoll,
     sendPollVote,
     sendGallery,
@@ -2267,6 +2324,16 @@ export function useChatAsJoiner(
             const previous = peerPollVotesRef.current.get(data.pollId) ?? []
             setMessages(prev => _applyPollVote(prev, data.pollId, data.optionIndices, false, previous))
             peerPollVotesRef.current.set(data.pollId, data.optionIndices)
+          } else if (data.kind === 'notefade') {
+            const id = data.msgId ?? generateMessageId()
+            setMessages(prev => {
+              const replyPreview = data.replyTo ? findReplyPreview(prev, data.replyTo) : undefined
+              return _insertSorted(prev, {
+                ...buildNotefadeMessage('peer', data.url, peerUsernameRef.current ?? undefined, id, data.ts),
+                replyTo: data.replyTo,
+                replyPreview,
+              })
+            })
           } else {
             voiceHandlerRef?.current?.(data)
           }
@@ -2331,6 +2398,25 @@ export function useChatAsJoiner(
         timed: timed || undefined,
       })
     })
+  }, [])
+
+  const sendNotefade = useCallback(async (url: string) => {
+    if (!ratchetRef.current || !wsRef.current) return
+    const msgId = generateMessageId()
+    const ts = Date.now()
+    const plaintext = new TextEncoder().encode(JSON.stringify({
+      kind: 'notefade', url, msgId, ts,
+    }))
+    const { state: newState, header, iv, ciphertext } = await ratchetEncrypt(
+      ratchetRef.current,
+      plaintext,
+    )
+    ratchetRef.current = newState
+    const payload = toBase64Url(concatBytes(iv, ciphertext))
+    wsRef.current.send({ type: 'message', header, payload })
+    setMessages(prev => _insertSorted(prev, buildNotefadeMessage(
+      'self', url, localUsernameRef.current ?? undefined, msgId, ts,
+    )))
   }, [])
 
   const sendReaction = useCallback(async (msgId: string, emoji: string, action: 'add' | 'remove') => {
@@ -2684,6 +2770,7 @@ export function useChatAsJoiner(
     peerTyping,
     inviteUrl: null,
     sendMessage,
+    sendNotefade,
     sendReaction,
     removeTimedMessage,
     sendTimedConsumed,
