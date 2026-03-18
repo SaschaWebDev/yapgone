@@ -31,6 +31,7 @@ interface ChatInputProps {
   fileError?: string | null;
   onOpenPollCreator?: () => void;
   onOpenPhotoComposer?: () => void;
+  onOpenNotefadeComposer?: () => void;
 }
 
 const TYPING_TIMEOUT = 5_000;
@@ -73,6 +74,7 @@ export function ChatInput({
   fileError,
   onOpenPollCreator,
   onOpenPhotoComposer,
+  onOpenNotefadeComposer,
   recentEmojis,
   onTrackEmoji,
 }: ChatInputProps) {
@@ -444,7 +446,7 @@ export function ChatInput({
               onClick={onStopRecordingTimed}
               aria-label='Send as timed voice note'
             >
-              <IconViewOnce size={20} />
+              <IconViewOnce size={36} />
             </button>
           </div>
         </div>
@@ -500,7 +502,7 @@ export function ChatInput({
               onClick={onStopRecordingTimed}
               aria-label='Send as timed voice note'
             >
-              <IconViewOnce size={20} />
+              <IconViewOnce size={36} />
             </button>
           </div>
         </div>
@@ -528,7 +530,7 @@ export function ChatInput({
             <button
               ref={attachBtnRef}
               className={styles.attachButton}
-              onClick={() => (onOpenPollCreator || onOpenPhotoComposer) ? setAttachMenuOpen(prev => !prev) : fileInputRef.current?.click()}
+              onClick={() => (onOpenPollCreator || onOpenPhotoComposer || onOpenNotefadeComposer) ? setAttachMenuOpen(prev => !prev) : fileInputRef.current?.click()}
               disabled={disabled}
               aria-label='Attach'
               type='button'
@@ -544,6 +546,7 @@ export function ChatInput({
                 onFileSelect={() => { fileInputRef.current?.click(); setAttachMenuOpen(false) }}
                 onPhotoSelect={onOpenPhotoComposer ? () => { onOpenPhotoComposer(); setAttachMenuOpen(false) } : undefined}
                 onPollCreate={onOpenPollCreator ? () => { onOpenPollCreator(); setAttachMenuOpen(false) } : undefined}
+                onNotefadeCreate={onOpenNotefadeComposer ? () => { onOpenNotefadeComposer(); setAttachMenuOpen(false) } : undefined}
                 onClose={() => setAttachMenuOpen(false)}
               />
             )}
@@ -604,7 +607,7 @@ export function ChatInput({
               disabled={disabled || !text.trim()}
               aria-label='Send as timed message'
             >
-              <IconViewOnce size={20} />
+              <IconViewOnce size={36} />
             </button>
           </div>
         )}

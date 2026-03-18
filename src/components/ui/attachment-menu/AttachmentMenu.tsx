@@ -1,6 +1,6 @@
 import { useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { IconFile, IconPoll, IconImage } from '../icons'
+import { IconFile, IconPoll, IconImage, IconNotefade } from '../icons'
 import styles from './AttachmentMenu.module.css'
 
 interface AttachmentMenuProps {
@@ -8,10 +8,11 @@ interface AttachmentMenuProps {
   onFileSelect: () => void
   onPhotoSelect?: () => void
   onPollCreate?: () => void
+  onNotefadeCreate?: () => void
   onClose: () => void
 }
 
-export function AttachmentMenu({ anchorRect, onFileSelect, onPhotoSelect, onPollCreate, onClose }: AttachmentMenuProps) {
+export function AttachmentMenu({ anchorRect, onFileSelect, onPhotoSelect, onPollCreate, onNotefadeCreate, onClose }: AttachmentMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
 
   const handleClickOutside = useCallback((e: MouseEvent) => {
@@ -34,7 +35,7 @@ export function AttachmentMenu({ anchorRect, onFileSelect, onPhotoSelect, onPoll
   }, [onClose])
 
   const rem = parseFloat(getComputedStyle(document.documentElement).fontSize)
-  const itemCount = 1 + (onPhotoSelect ? 1 : 0) + (onPollCreate ? 1 : 0)
+  const itemCount = 1 + (onPhotoSelect ? 1 : 0) + (onPollCreate ? 1 : 0) + (onNotefadeCreate ? 1 : 0)
   const estimatedHeight = itemCount * (2.65 * rem) + 0.7 * rem
   const spaceAbove = anchorRect.top - 8
   const placeAbove = spaceAbove >= estimatedHeight
@@ -80,6 +81,16 @@ export function AttachmentMenu({ anchorRect, onFileSelect, onPhotoSelect, onPoll
           >
             <span className={styles.menuItemIcon}><IconPoll size={18} /></span>
             Poll
+          </button>
+        )}
+        {onNotefadeCreate && (
+          <button
+            type="button"
+            className={styles.menuItem}
+            onClick={() => { onNotefadeCreate(); onClose() }}
+          >
+            <span className={styles.menuItemIcon}><IconNotefade size={18} /></span>
+            Self-destructing note
           </button>
         )}
       </div>

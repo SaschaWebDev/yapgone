@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { buildInviteFragment, buildWsUrl, createRoom } from '@/api'
+import { buildInviteFragment, buildWsUrl, createRoom, createNotefadeNote } from '@/api'
 
 describe('api client', () => {
   it('buildInviteFragment formats roomId:pubKey', () => {
@@ -56,6 +56,50 @@ describe('api client', () => {
     }))
 
     await expect(createRoom()).rejects.toThrow('Invalid room response')
+
+    vi.unstubAllGlobals()
+  })
+
+  it('createNotefadeNote returns URL on success', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ url: 'https://notefade.com/#abc123:payload' }),
+    })
+    vi.stubGlobal('fetch', mockFetch)
+
+    const url = await createNotefadeNote('secret message')
+    expect(url).toBe('https://notefade.com/#abc123:payload')
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/notefade/create-note'),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'secret message' }),
+      },
+    )
+
+    vi.unstubAllGlobals()
+  })
+
+  it('createNotefadeNote throws on non-ok response', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      json: () => Promise.resolve({ error: 'Rate limit exceeded' }),
+    }))
+
+    await expect(createNotefadeNote('test')).rejects.toThrow('Rate limit exceeded')
+
+    vi.unstubAllGlobals()
+  })
+
+  it('createNotefadeNote throws on invalid response body', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ notUrl: 'oops' }),
+    }))
+
+    await expect(createNotefadeNote('test')).rejects.toThrow()
 
     vi.unstubAllGlobals()
   })
