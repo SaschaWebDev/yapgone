@@ -440,6 +440,7 @@ function ChatView({
   const [lightboxImage, setLightboxImage] = useState<{ url: string; fileName?: string } | null>(null);
   const [pollCreatorOpen, setPollCreatorOpen] = useState(false);
   const [photoComposerOpen, setPhotoComposerOpen] = useState(false);
+  const [cameraFile, setCameraFile] = useState<File | null>(null);
   const [notefadeComposerOpen, setNotefadeComposerOpen] = useState(false);
   const [galleryLightbox, setGalleryLightbox] = useState<{ images: GalleryImage[]; index: number } | null>(null);
   const isAtBottomRef = useRef(true);
@@ -528,7 +529,13 @@ function ChatView({
   const handleSendGallery = useCallback(async (files: File[], caption?: string, timed?: boolean) => {
     await onSendGallery(files, caption, timed);
     setPhotoComposerOpen(false);
+    setCameraFile(null);
   }, [onSendGallery]);
+
+  const handleCameraCapture = useCallback((file: File) => {
+    setCameraFile(file);
+    setPhotoComposerOpen(true);
+  }, []);
 
   const handleNotefadeSend = useCallback(async (noteText: string) => {
     try {
@@ -1615,6 +1622,7 @@ function ChatView({
         fileError={fileError}
         onOpenPollCreator={() => setPollCreatorOpen(true)}
         onOpenPhotoComposer={() => setPhotoComposerOpen(true)}
+        onCameraCapture={handleCameraCapture}
         onOpenNotefadeComposer={() => setNotefadeComposerOpen(true)}
         recentEmojis={recentEmojis}
         onTrackEmoji={trackEmoji}
@@ -1630,7 +1638,8 @@ function ChatView({
       {photoComposerOpen && (
         <PhotoComposer
           onSend={handleSendGallery}
-          onClose={() => setPhotoComposerOpen(false)}
+          onClose={() => { setPhotoComposerOpen(false); setCameraFile(null) }}
+          initialFiles={cameraFile ? [cameraFile] : undefined}
           recentEmojis={recentEmojis}
           onTrackEmoji={trackEmoji}
         />

@@ -32,6 +32,7 @@ interface ChatInputProps {
   onOpenPollCreator?: () => void;
   onOpenPhotoComposer?: () => void;
   onOpenNotefadeComposer?: () => void;
+  onCameraCapture?: (file: File) => void;
 }
 
 const TYPING_TIMEOUT = 5_000;
@@ -75,6 +76,7 @@ export function ChatInput({
   onOpenPollCreator,
   onOpenPhotoComposer,
   onOpenNotefadeComposer,
+  onCameraCapture,
   recentEmojis,
   onTrackEmoji,
 }: ChatInputProps) {
@@ -91,6 +93,7 @@ export function ChatInput({
   const animFrameRef = useRef<number | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const attachBtnRef = useRef<HTMLButtonElement>(null);
   const emojiBtnRef = useRef<HTMLButtonElement>(null);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
@@ -109,6 +112,13 @@ export function ChatInput({
     // Reset the input so the same file can be selected again
     if (fileInputRef.current) fileInputRef.current.value = '';
   }, [onSendFile]);
+
+  const handleCameraCapture = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !onCameraCapture) return;
+    onCameraCapture(file);
+    if (cameraInputRef.current) cameraInputRef.current.value = '';
+  }, [onCameraCapture]);
 
   const canAutoFocus = !disabled && !isRecording;
 
@@ -527,10 +537,22 @@ export function ChatInput({
               disabled={disabled}
               tabIndex={-1}
             />
+            {onCameraCapture && (
+              <input
+                ref={cameraInputRef}
+                type='file'
+                accept='image/*'
+                capture='environment'
+                className={styles.hiddenFileInput}
+                onChange={handleCameraCapture}
+                disabled={disabled}
+                tabIndex={-1}
+              />
+            )}
             <button
               ref={attachBtnRef}
               className={styles.attachButton}
-              onClick={() => (onOpenPollCreator || onOpenPhotoComposer || onOpenNotefadeComposer) ? setAttachMenuOpen(prev => !prev) : fileInputRef.current?.click()}
+              onClick={() => (onOpenPollCreator || onOpenPhotoComposer || onCameraCapture || onOpenNotefadeComposer) ? setAttachMenuOpen(prev => !prev) : fileInputRef.current?.click()}
               disabled={disabled}
               aria-label='Attach'
               type='button'
@@ -545,6 +567,7 @@ export function ChatInput({
                 anchorRect={attachBtnRef.current.getBoundingClientRect()}
                 onFileSelect={() => { fileInputRef.current?.click(); setAttachMenuOpen(false) }}
                 onPhotoSelect={onOpenPhotoComposer ? () => { onOpenPhotoComposer(); setAttachMenuOpen(false) } : undefined}
+                onCameraCapture={onCameraCapture ? () => { cameraInputRef.current?.click(); setAttachMenuOpen(false) } : undefined}
                 onPollCreate={onOpenPollCreator ? () => { onOpenPollCreator(); setAttachMenuOpen(false) } : undefined}
                 onNotefadeCreate={onOpenNotefadeComposer ? () => { onOpenNotefadeComposer(); setAttachMenuOpen(false) } : undefined}
                 onClose={() => setAttachMenuOpen(false)}
