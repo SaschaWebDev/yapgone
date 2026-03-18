@@ -8,12 +8,12 @@ export function IconViewOnce({ size = 20, ...props }: IconProps) {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth={2}
+      strokeWidth={1.5}
       strokeLinecap="round"
       strokeLinejoin="round"
       {...props}
     >
-      <circle cx="12" cy="12" r="10" />
+      <circle cx="12" cy="12" r="11" />
       <text
         x="12"
         y="12"
@@ -21,11 +21,11 @@ export function IconViewOnce({ size = 20, ...props }: IconProps) {
         dominantBaseline="central"
         fill="currentColor"
         stroke="none"
-        fontSize="14"
+        fontSize="6.5"
         fontWeight="700"
         fontFamily="system-ui, sans-serif"
       >
-        1
+        15s
       </text>
     </svg>
   )

@@ -1,0 +1,1 @@
+export { NotefadeComposer } from './NotefadeComposer'
