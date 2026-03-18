@@ -15,9 +15,10 @@ interface PhotoComposerProps {
   onClose: () => void
   recentEmojis?: readonly string[]
   onTrackEmoji?: (emoji: string) => void
+  initialFiles?: File[]
 }
 
-export function PhotoComposer({ onSend, onClose, recentEmojis = [], onTrackEmoji }: PhotoComposerProps) {
+export function PhotoComposer({ onSend, onClose, recentEmojis = [], onTrackEmoji, initialFiles }: PhotoComposerProps) {
   const [photos, setPhotos] = useState<PhotoEntry[]>([])
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [swapSource, setSwapSource] = useState<number | null>(null)
@@ -29,9 +30,12 @@ export function PhotoComposer({ onSend, onClose, recentEmojis = [], onTrackEmoji
   const emojiBtnRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
-    // Open file picker on mount
-    fileInputRef.current?.click()
-  }, [])
+    if (initialFiles && initialFiles.length > 0) {
+      addFiles(initialFiles)
+    } else {
+      fileInputRef.current?.click()
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
