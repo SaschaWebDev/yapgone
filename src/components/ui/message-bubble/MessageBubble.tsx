@@ -51,6 +51,7 @@ interface MessageBubbleProps {
   notefadeUrl?: string
   gallery?: GalleryImage[]
   onGalleryImageClick?: (index: number) => void
+  senderColor?: string
 }
 
 function formatSeconds(seconds: number): string {
@@ -533,6 +534,7 @@ export function MessageBubble({
   notefadeUrl,
   gallery,
   onGalleryImageClick,
+  senderColor: senderColorProp,
 }: MessageBubbleProps) {
   const [pickerMode, setPickerMode] = useState<PickerMode>('closed')
   const [copyDone, setCopyDone] = useState(false)
@@ -712,7 +714,7 @@ export function MessageBubble({
         onTouchEnd={handleTouchEnd}
         onTouchCancel={handleTouchEnd}
       >
-        {displayName && <p className={styles.displayName}>{displayName}</p>}
+        {displayName && <p className={styles.displayName} style={senderColorProp ? { color: senderColorProp } : undefined}>{displayName}</p>}
         {replyTo && replyPreview && (
           <div
             className={`${styles.quoteBlock}${onReplyClick ? ` ${styles.quoteBlockClickable}` : ''}`}
