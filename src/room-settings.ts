@@ -12,6 +12,7 @@ export interface SafeWordSettings {
 export interface RoomSettings {
   usernameModeEnabled: boolean
   safeWord: SafeWordSettings | null
+  maxParticipants: number
 }
 
 interface RoomSettingsPayloadV1 {
@@ -22,11 +23,13 @@ interface RoomSettingsPayloadV1 {
     h: string
     i: number
   }
+  m?: number // maxParticipants
 }
 
 export const DEFAULT_ROOM_SETTINGS: RoomSettings = {
   usernameModeEnabled: false,
   safeWord: null,
+  maxParticipants: 2,
 }
 
 function isSafeWordSettings(input: unknown): input is SafeWordSettings {
@@ -42,15 +45,22 @@ function isSafeWordSettings(input: unknown): input is SafeWordSettings {
 }
 
 export function normalizeRoomSettings(input?: Partial<RoomSettings> | null): RoomSettings {
+  const maxParticipants = typeof input?.maxParticipants === 'number'
+    && Number.isInteger(input.maxParticipants)
+    && input.maxParticipants >= 2
+    && input.maxParticipants <= 200
+    ? input.maxParticipants
+    : 2
   return {
     usernameModeEnabled: Boolean(input?.usernameModeEnabled),
     safeWord: isSafeWordSettings(input?.safeWord) ? input.safeWord : null,
+    maxParticipants,
   }
 }
 
 export function encodeRoomSettings(settings: RoomSettings): string | null {
   const normalized = normalizeRoomSettings(settings)
-  if (!normalized.usernameModeEnabled && !normalized.safeWord) {
+  if (!normalized.usernameModeEnabled && !normalized.safeWord && normalized.maxParticipants === 2) {
     return null
   }
 
@@ -64,6 +74,9 @@ export function encodeRoomSettings(settings: RoomSettings): string | null {
       h: normalized.safeWord.hashB64,
       i: normalized.safeWord.iterations,
     }
+  }
+  if (normalized.maxParticipants !== 2) {
+    payload.m = normalized.maxParticipants
   }
 
   const bytes = new TextEncoder().encode(JSON.stringify(payload))
@@ -90,6 +103,7 @@ export function decodeRoomSettings(encoded: string | null | undefined): RoomSett
     return normalizeRoomSettings({
       usernameModeEnabled: payload.u === 1,
       safeWord,
+      maxParticipants: typeof payload.m === 'number' ? payload.m : 2,
     })
   } catch {
     return null
