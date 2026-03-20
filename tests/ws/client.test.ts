@@ -44,7 +44,7 @@ describe('ws message validation', () => {
   })
 
   it('validates server peer-joined', () => {
-    const result = ServerMessageSchema.safeParse({ type: 'peer-joined' })
+    const result = ServerMessageSchema.safeParse({ type: 'peer-joined', clientId: 'abc', clientCount: 2 })
     expect(result.success).toBe(true)
   })
 

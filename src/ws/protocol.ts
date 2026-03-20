@@ -9,13 +9,15 @@ export interface MessageHeader {
 export type ClientMessage =
   | { type: 'pubkey'; key: string }
   | { type: 'message'; header: MessageHeader; payload: string }
+  | { type: 'direct'; targetId: string; payload: string }
   | { type: 'typing'; active: boolean }
   | { type: 'leave' }
   | { type: 'close-room' }
 
 export type ServerMessage =
-  | { type: 'peer-joined' }
-  | { type: 'peer-left' }
+  | { type: 'peer-joined'; clientId: string; clientCount: number }
+  | { type: 'peer-left'; clientId: string; clientCount: number }
+  | { type: 'peer-list'; clientIds: string[]; yourId: string }
   | { type: 'room-full' }
   | { type: 'room-expired' }
   | { type: 'error'; code: string; message: string }
@@ -43,6 +45,12 @@ const TypingMessageSchema = z.object({
   active: z.boolean(),
 })
 
+const DirectMessageSchema = z.object({
+  type: z.literal('direct'),
+  targetId: z.string().min(1),
+  payload: z.string(),
+})
+
 const LeaveMessageSchema = z.object({
   type: z.literal('leave'),
 })
@@ -54,13 +62,27 @@ const CloseRoomMessageSchema = z.object({
 export const ClientMessageSchema = z.discriminatedUnion('type', [
   PubkeyMessageSchema,
   ChatMessageSchema,
+  DirectMessageSchema,
   TypingMessageSchema,
   LeaveMessageSchema,
   CloseRoomMessageSchema,
 ])
 
-const PeerJoinedSchema = z.object({ type: z.literal('peer-joined') })
-const PeerLeftSchema = z.object({ type: z.literal('peer-left') })
+const PeerJoinedSchema = z.object({
+  type: z.literal('peer-joined'),
+  clientId: z.string(),
+  clientCount: z.number().int().positive(),
+})
+const PeerLeftSchema = z.object({
+  type: z.literal('peer-left'),
+  clientId: z.string(),
+  clientCount: z.number().int().nonnegative(),
+})
+const PeerListSchema = z.object({
+  type: z.literal('peer-list'),
+  clientIds: z.array(z.string()),
+  yourId: z.string(),
+})
 const RoomFullSchema = z.object({ type: z.literal('room-full') })
 const RoomExpiredSchema = z.object({ type: z.literal('room-expired') })
 const RoomClosedSchema = z.object({ type: z.literal('room-closed') })
@@ -73,6 +95,7 @@ const ErrorSchema = z.object({
 export const ServerMessageSchema = z.discriminatedUnion('type', [
   PeerJoinedSchema,
   PeerLeftSchema,
+  PeerListSchema,
   RoomFullSchema,
   RoomExpiredSchema,
   RoomClosedSchema,
