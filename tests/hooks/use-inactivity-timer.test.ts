@@ -8,14 +8,16 @@ import { useInactivityTimer } from '../../src/hooks/use-inactivity-timer'
  * Tiny test harness that renders a component using the hook
  * and exposes the latest return value, avoiding @testing-library/react.
  */
-function renderHook(ttlMs: number) {
+function renderHook(ttlMs: number, paused?: boolean) {
   let current: ReturnType<typeof useInactivityTimer> = {
     remainingSeconds: 0,
     resetTimer: () => {},
   }
 
+  let currentPaused = paused
+
   function TestComponent() {
-    current = useInactivityTimer(ttlMs)
+    current = useInactivityTimer(ttlMs, currentPaused)
     return null
   }
 
@@ -30,6 +32,12 @@ function renderHook(ttlMs: number) {
   return {
     get result() {
       return current
+    },
+    rerender(nextPaused: boolean) {
+      currentPaused = nextPaused
+      act(() => {
+        root.render(createElement(TestComponent))
+      })
     },
     unmount() {
       act(() => {
@@ -106,5 +114,37 @@ describe('useInactivityTimer', () => {
     hook.unmount()
     expect(clearSpy).toHaveBeenCalled()
     clearSpy.mockRestore()
+  })
+
+  it('does not count down when paused', () => {
+    const hook = renderHook(60_000, true)
+
+    act(() => {
+      vi.advanceTimersByTime(10_000)
+    })
+
+    expect(hook.result.remainingSeconds).toBe(60)
+    hook.unmount()
+  })
+
+  it('starts fresh when unpaused', () => {
+    const hook = renderHook(60_000, true)
+
+    act(() => {
+      vi.advanceTimersByTime(20_000)
+    })
+
+    expect(hook.result.remainingSeconds).toBe(60)
+
+    act(() => {
+      hook.rerender(false)
+    })
+
+    act(() => {
+      vi.advanceTimersByTime(1_000)
+    })
+
+    expect(hook.result.remainingSeconds).toBe(59)
+    hook.unmount()
   })
 })
