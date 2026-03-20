@@ -287,6 +287,12 @@
   flex-direction: column;
   gap: 0.65rem;
   text-align: left;
+  animation: settingsFadeIn 0.2s ease-out;
+}
+
+@keyframes settingsFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .settingsRow {
@@ -481,6 +487,50 @@
   }
 }
 
+.participantBadge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  height: 1.5rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: rgba(var(--fg), 0.06);
+  border: 1px solid rgba(var(--fg), 0.08);
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.participantBadge:hover {
+  background: rgba(var(--fg), 0.1);
+  color: var(--text-primary);
+  border-color: rgba(var(--fg), 0.15);
+}
+
+.verifyButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: var(--radius-sm);
+  background: rgba(var(--fg), 0.04);
+  border: 1px solid rgba(var(--fg), 0.08);
+  color: rgba(var(--fg), 0.3);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.verifyButton:hover {
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.06);
+  border-color: rgba(var(--accent-rgb), 0.2);
+}
+
 /* Header actions wrapper */
 .headerActions {
   display: flex;
@@ -610,4 +660,157 @@
   0%, 100% { opacity: 0.2; }
   50% { opacity: 1; }
 }
+
+.sliderRow {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.sliderLabel {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.sliderValue {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.participantSlider {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(var(--fg), 0.1);
+  outline: none;
+}
+
+.participantSlider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: 2px solid var(--bg);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+.participantSlider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: 2px solid var(--bg);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+.safeWordInputWrapper {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  background: rgba(var(--fg), 0.05);
+  border: 1px solid rgba(var(--fg), 0.08);
+  border-radius: 8px;
+  transition: border-color 0.15s ease;
+  animation: settingsFadeIn 0.2s ease-out;
+}
+
+.safeWordInputWrapper:focus-within {
+  border-color: rgba(var(--accent-rgb), 0.4);
+}
+
+.safeWordInlineInput {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 16px;
+  font-size: 0.85rem;
+  font-family: inherit;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  outline: none;
+}
+
+.safeWordInlineInput::placeholder {
+  color: rgba(var(--fg), 0.2);
+}
+
+.copySafeWordButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  background: none;
+  border: none;
+  border-left: 1px solid rgba(var(--fg), 0.06);
+  color: rgba(var(--fg), 0.25);
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.copySafeWordButton svg {
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.copySafeWordButtonCopied svg {
+  animation: swCheckPop 0.25s ease-out;
+}
+
+@keyframes swCheckPop {
+  0% { transform: scale(0.5); opacity: 0; }
+  60% { transform: scale(1.15); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.copySafeWordButton:hover {
+  color: rgba(var(--fg), 0.5);
+}
+
+.copySafeWordButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.showSafeWordButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  background: none;
+  border: none;
+  color: rgba(var(--fg), 0.25);
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.showSafeWordButton:hover {
+  color: rgba(var(--fg), 0.5);
+}
+
+.generateSafeWordButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  background: none;
+  border: none;
+  border-left: 1px solid rgba(var(--fg), 0.06);
+  color: rgba(var(--fg), 0.25);
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.generateSafeWordButton:hover {
+  color: rgba(var(--fg), 0.5);
+}
+
 

@@ -16,11 +16,13 @@ describe('room settings', () => {
     const encoded = encodeRoomSettings({
       usernameModeEnabled: true,
       safeWord: null,
+      maxParticipants: 2,
     })
     const decoded = decodeRoomSettings(encoded)
     expect(decoded).toEqual({
       usernameModeEnabled: true,
       safeWord: null,
+      maxParticipants: 2,
     })
   })
 

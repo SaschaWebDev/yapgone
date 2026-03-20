@@ -42,3 +42,17 @@ export type CallState =
   | 'active'
   | 'ended'
   | 'failed'
+
+export interface PeerInfo {
+  clientId: string
+  pubKey: CryptoKey | null
+  pubKeyRaw: Uint8Array | null
+  username: string | null
+}
+
+export interface GroupCryptoState {
+  myId: string
+  myPubKeyRaw: Uint8Array
+  peerRatchets: Map<string, RatchetState>
+  peers: Map<string, PeerInfo>
+}

@@ -55,6 +55,9 @@ export const DEFAULT_TITLE = 'yapgone'
 
 export const VOICE_E2EE_ENABLED = true
 
+export const MAX_GROUP_SIZE = 50
+export const DEFAULT_MAX_PARTICIPANTS = 2
+
 export const STORAGE_KEYS = {
   THEME: 'yapgone-theme',
   CREATOR_PREFIX: 'yapgone-creator-',

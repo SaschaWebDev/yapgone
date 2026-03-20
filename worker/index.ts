@@ -3,12 +3,13 @@ import { ChatRoom } from './chat-room'
 
 interface Env {
   CHAT_ROOM: DurableObjectNamespace
+  INVITE_SHARDS: KVNamespace
   NOTEFADE_API_KEY?: string
 }
 
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
 }
 
@@ -67,7 +68,16 @@ const NotefadeUpstreamResponseSchema = z.object({
   expiresAt: z.number(),
 })
 
+const CreateRoomSchema = z.object({
+  maxClients: z.number().int().min(2).max(200).optional(),
+}).optional()
+
+const StoreShardSchema = z.object({
+  shard: z.string().min(1).max(512),
+})
+
 const ROOM_ID_PATTERN = /^[a-zA-Z0-9-]+$/
+const SHARD_TTL_SECONDS = 3600 // 1 hour
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -86,7 +96,72 @@ export default {
       }
 
       const roomId = crypto.randomUUID()
+
+      // Parse optional room config
+      const rawBody: unknown = await request.json().catch(() => undefined)
+      const configResult = CreateRoomSchema.safeParse(rawBody)
+      if (configResult.success && configResult.data?.maxClients) {
+        // Forward config to the Durable Object
+        const id = env.CHAT_ROOM.idFromName(roomId)
+        const stub = env.CHAT_ROOM.get(id)
+        await stub.fetch(new Request('https://internal/config', {
+          method: 'POST',
+          body: JSON.stringify({ maxClients: configResult.data.maxClients }),
+        }))
+      }
+
       return jsonResponse({ roomId }, 201)
+    }
+
+    // PATCH /api/rooms/:id/config — update room config
+    const configMatch = url.pathname.match(/^\/api\/rooms\/([a-zA-Z0-9-]+)\/config$/)
+    if (configMatch?.[1] && request.method === 'PATCH') {
+      const roomId = configMatch[1]
+      if (!ROOM_ID_PATTERN.test(roomId)) {
+        return jsonResponse({ error: 'Invalid room ID' }, 400)
+      }
+      const id = env.CHAT_ROOM.idFromName(roomId)
+      const stub = env.CHAT_ROOM.get(id)
+      return stub.fetch(new Request(request.url, { method: 'POST', body: request.body }))
+    }
+
+    // POST /api/rooms/:id/shard — store XOR share for invite link splitting
+    const shardStoreMatch = url.pathname.match(/^\/api\/rooms\/([a-zA-Z0-9-]+)\/shard$/)
+    if (shardStoreMatch?.[1] && request.method === 'POST') {
+      const roomId = shardStoreMatch[1]
+      if (!ROOM_ID_PATTERN.test(roomId)) {
+        return jsonResponse({ error: 'Invalid room ID' }, 400)
+      }
+
+      const rawBody: unknown = await request.json().catch(() => null)
+      const parsed = StoreShardSchema.safeParse(rawBody)
+      if (!parsed.success) {
+        return jsonResponse({ error: 'Invalid request body' }, 400)
+      }
+
+      await env.INVITE_SHARDS.put(`shard:${roomId}`, parsed.data.shard, {
+        expirationTtl: SHARD_TTL_SECONDS,
+      })
+
+      return jsonResponse({ ok: true }, 201)
+    }
+
+    // GET /api/rooms/:id/shard — fetch + delete shard (one-time read)
+    if (shardStoreMatch?.[1] && request.method === 'GET') {
+      const roomId = shardStoreMatch[1]
+      if (!ROOM_ID_PATTERN.test(roomId)) {
+        return jsonResponse({ error: 'Invalid room ID' }, 400)
+      }
+
+      const shard = await env.INVITE_SHARDS.get(`shard:${roomId}`)
+      if (!shard) {
+        return jsonResponse({ error: 'Shard not found or already consumed' }, 404)
+      }
+
+      // Delete after read (one-time)
+      await env.INVITE_SHARDS.delete(`shard:${roomId}`)
+
+      return jsonResponse({ shard }, 200)
     }
 
     // GET /ws/:roomId — WebSocket upgrade to Durable Object

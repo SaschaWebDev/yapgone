@@ -11,6 +11,7 @@ describe('api client', () => {
     const result = buildInviteFragment('room-123', 'pubkey-abc', {
       usernameModeEnabled: true,
       safeWord: null,
+      maxParticipants: 2,
     })
     expect(result.split(':')).toHaveLength(3)
     expect(result.startsWith('room-123:pubkey-abc:')).toBe(true)
@@ -35,7 +36,7 @@ describe('api client', () => {
     expect(roomId).toBe('abc-123')
     expect(mockFetch).toHaveBeenCalledWith(
       expect.stringContaining('/api/rooms'),
-      { method: 'POST' }
+      expect.objectContaining({ method: 'POST' })
     )
 
     vi.unstubAllGlobals()

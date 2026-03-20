@@ -17,6 +17,7 @@ describe('parseFragment', () => {
     const encoded = encodeRoomSettings({
       usernameModeEnabled: true,
       safeWord: null,
+      maxParticipants: 2,
     })
     const parsed = parseFragment(`#room-1:pub-key:${encoded}`)
     expect(parsed).toEqual({
@@ -26,6 +27,7 @@ describe('parseFragment', () => {
       roomSettings: {
         usernameModeEnabled: true,
         safeWord: null,
+        maxParticipants: 2,
       },
     })
   })

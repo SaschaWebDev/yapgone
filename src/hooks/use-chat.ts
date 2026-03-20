@@ -10,6 +10,8 @@ import {
   toBase64Url,
   fromBase64Url,
   concatBytes,
+  xorSplit,
+  xorCombine,
   initCreator,
   initJoiner,
   ratchetEncrypt,
@@ -21,7 +23,7 @@ import { createReconnectingWebSocket } from '@/ws/reconnecting-client'
 import type { ReconnectingChatWebSocket } from '@/ws/reconnecting-client'
 import type { ClientMessage, ServerMessage } from '@/ws'
 import type { RatchetState, VoiceSignal } from '@/types'
-import { buildWsUrl, buildInviteFragment } from '@/api'
+import { buildWsUrl, buildSplitInviteFragment, isSplitInvite, extractUrlShare, fetchShard, storeShard } from '@/api'
 import { computeWaveform } from '@/utils'
 import type { RoomSettings } from '@/room-settings'
 import { DEFAULT_ROOM_SETTINGS, normalizeRoomSettings } from '@/room-settings'
@@ -624,9 +626,9 @@ export function useChatAsCreator(
 
   const refreshInviteUrl = useCallback((nextSettings: RoomSettings) => {
     const roomId = roomIdRef.current
-    const creatorPubKey = creatorPubKeyRef.current
-    if (!roomId || !creatorPubKey) return
-    const fragment = buildInviteFragment(roomId, creatorPubKey, nextSettings)
+    const urlShareB64 = creatorPubKeyRef.current
+    if (!roomId || !urlShareB64) return
+    const fragment = buildSplitInviteFragment(roomId, urlShareB64, nextSettings)
     const url = `${window.location.origin}${window.location.pathname}#${fragment}`
     setInviteUrl(url)
     window.location.hash = fragment
@@ -1034,9 +1036,17 @@ export function useChatAsCreator(
         roomIdRef.current = roomId
 
         const pubKeyRaw = await exportPublicKey(kp.publicKey)
-        const pubKeyB64 = toBase64Url(pubKeyRaw)
-        creatorPubKeyRef.current = pubKeyB64
-        const fragment = buildInviteFragment(roomId, pubKeyB64, roomSettingsRef.current)
+
+        // XOR-split the pubkey for invite link
+        const { share1: urlShare, share2: serverShard } = xorSplit(pubKeyRaw)
+        const urlShareB64 = toBase64Url(urlShare)
+        const serverShardB64 = toBase64Url(serverShard)
+        creatorPubKeyRef.current = urlShareB64
+
+        // Store server shard
+        await storeShard(roomId, serverShardB64)
+
+        const fragment = buildSplitInviteFragment(roomId, urlShareB64, roomSettingsRef.current)
         const url = `${window.location.origin}${window.location.pathname}#${fragment}`
         setInviteUrl(url)
         window.location.hash = fragment
@@ -2145,7 +2155,17 @@ export function useChatAsJoiner(
         const kp = await generateKeyPair()
         if (cancelled) return
 
-        const creatorPubKeyRaw = fromBase64Url(creatorPubKeyB64)
+        // Resolve creator public key — either direct or XOR-split
+        let creatorPubKeyRaw: Uint8Array
+        if (isSplitInvite(creatorPubKeyB64)) {
+          const urlShareB64 = extractUrlShare(creatorPubKeyB64)
+          const urlShare = fromBase64Url(urlShareB64)
+          const serverShardB64 = await fetchShard(roomId)
+          const serverShard = fromBase64Url(serverShardB64)
+          creatorPubKeyRaw = xorCombine(urlShare, serverShard)
+        } else {
+          creatorPubKeyRaw = fromBase64Url(creatorPubKeyB64)
+        }
         const creatorPubKey = await importPublicKey(creatorPubKeyRaw)
 
         // Derive shared secret and init ratchet

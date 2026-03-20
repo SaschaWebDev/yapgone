@@ -1,10 +1,25 @@
-import { useRef, useEffect, useState, useCallback, type FormEvent } from 'react';
+import {
+  useRef,
+  useEffect,
+  useState,
+  useCallback,
+  type FormEvent,
+} from 'react';
 import { computeWaveform } from '@/utils';
 import { createNotefadeNote } from '@/api';
+import { generateSafeWord } from '@/crypto';
 import chatBubbleStyles from '@/components/ui/message-bubble/MessageBubble.module.css';
-import { useChatAsCreator, useChatAsJoiner, useVoiceCall, useNotifications, useLocalChatSettings, useInactivityTimer, useRecentEmojis } from '@/hooks';
+import {
+  useGroupChat,
+  useVoiceCall,
+  useNotifications,
+  useLocalChatSettings,
+  useInactivityTimer,
+  useRecentEmojis,
+  senderColor,
+} from '@/hooks';
 import type { VoiceSignal } from '@/types';
-import type { ChatMessage, GalleryImage } from '@/hooks/use-chat';
+import type { ChatMessage, GalleryImage } from '@/hooks/chat-helpers';
 import type { ConnectionQuality } from '@/components/ui/status-badge/StatusBadge';
 import type { RoomSettings } from '@/room-settings';
 import {
@@ -31,6 +46,8 @@ import {
   PollCreator,
   PhotoComposer,
   NotefadeComposer,
+  SafetyNumber,
+  ParticipantList,
 } from '@/components';
 import {
   MAX_MESSAGE_LENGTH,
@@ -60,13 +77,17 @@ interface ChatProps {
 }
 
 export function Chat({ roomId, creatorPubKey, roomSettings }: ChatProps) {
-  const normalizedSettings = normalizeRoomSettings(roomSettings ?? DEFAULT_ROOM_SETTINGS);
+  const normalizedSettings = normalizeRoomSettings(
+    roomSettings ?? DEFAULT_ROOM_SETTINGS,
+  );
   const isCreator =
     sessionStorage.getItem(`${STORAGE_KEYS.CREATOR_PREFIX}${roomId}`) === '1';
   const [safeWordPassed, setSafeWordPassed] = useState(false);
 
   if (isCreator) {
-    return <CreatorChat roomId={roomId} initialRoomSettings={normalizedSettings} />;
+    return (
+      <CreatorChat roomId={roomId} initialRoomSettings={normalizedSettings} />
+    );
   }
 
   if (normalizedSettings.safeWord && !safeWordPassed) {
@@ -100,32 +121,47 @@ function SafeWordGate({
   const [value, setValue] = useState('');
   const [attempts, setAttempts] = useState(0);
   const [blocked, setBlocked] = useState(
-    sessionStorage.getItem(`${STORAGE_KEYS.SAFEWORD_LOCK_PREFIX}${roomId}`) === '1',
+    sessionStorage.getItem(`${STORAGE_KEYS.SAFEWORD_LOCK_PREFIX}${roomId}`) ===
+      '1',
   );
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const remaining = Math.max(0, SAFE_WORD_MAX_ATTEMPTS - attempts);
 
-  const handleSubmit = useCallback(async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!roomSettings.safeWord || blocked || checking) return;
-    setChecking(true);
-    const valid = await verifySafeWord(value, roomSettings.safeWord);
-    setChecking(false);
-    if (valid) {
-      setError(null);
-      onPassed();
-      return;
-    }
+  const handleSubmit = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      if (!roomSettings.safeWord || blocked || checking) return;
+      setChecking(true);
+      const valid = await verifySafeWord(value, roomSettings.safeWord);
+      setChecking(false);
+      if (valid) {
+        setError(null);
+        onPassed();
+        return;
+      }
 
-    const nextAttempts = attempts + 1;
-    setAttempts(nextAttempts);
-    setError('Safe word is incorrect');
-    if (nextAttempts >= SAFE_WORD_MAX_ATTEMPTS) {
-      sessionStorage.setItem(`${STORAGE_KEYS.SAFEWORD_LOCK_PREFIX}${roomId}`, '1');
-      setBlocked(true);
-    }
-  }, [attempts, blocked, checking, onPassed, roomId, roomSettings.safeWord, value]);
+      const nextAttempts = attempts + 1;
+      setAttempts(nextAttempts);
+      setError('Safe word is incorrect');
+      if (nextAttempts >= SAFE_WORD_MAX_ATTEMPTS) {
+        sessionStorage.setItem(
+          `${STORAGE_KEYS.SAFEWORD_LOCK_PREFIX}${roomId}`,
+          '1',
+        );
+        setBlocked(true);
+      }
+    },
+    [
+      attempts,
+      blocked,
+      checking,
+      onPassed,
+      roomId,
+      roomSettings.safeWord,
+      value,
+    ],
+  );
 
   return (
     <div className={styles.wrapper}>
@@ -157,7 +193,9 @@ function SafeWordGate({
             Too many failed attempts. Reload and use a new invite link.
           </p>
         ) : (
-          <p className={styles.safeWordRemaining}>Remaining attempts: {remaining}</p>
+          <p className={styles.safeWordRemaining}>
+            Remaining attempts: {remaining}
+          </p>
         )}
         {error && <p className={styles.errorMessage}>{error}</p>}
       </div>
@@ -165,7 +203,13 @@ function SafeWordGate({
   );
 }
 
-function CreatorChat({ roomId, initialRoomSettings }: { roomId: string; initialRoomSettings: RoomSettings }) {
+function CreatorChat({
+  roomId,
+  initialRoomSettings,
+}: {
+  roomId: string;
+  initialRoomSettings: RoomSettings;
+}) {
   const voiceHandlerRef = useRef<((signal: VoiceSignal) => void) | null>(null);
   const {
     phase,
@@ -194,7 +238,18 @@ function CreatorChat({ roomId, initialRoomSettings }: { roomId: string; initialR
     setLocalUsername,
     mediaKeyRaw,
     error,
-  } = useChatAsCreator(roomId, voiceHandlerRef, initialRoomSettings);
+    participantCount,
+    myClientId,
+    peerUsernames,
+    myPubKeyRaw,
+    peerPubKeys,
+  } = useGroupChat(
+    roomId,
+    'creator',
+    undefined,
+    voiceHandlerRef,
+    initialRoomSettings,
+  );
 
   const voice = useVoiceCall({
     sendSignal: sendVoiceSignal,
@@ -230,6 +285,11 @@ function CreatorChat({ roomId, initialRoomSettings }: { roomId: string; initialR
       peerUsername={peerUsername}
       onSetLocalUsername={setLocalUsername}
       voice={voice}
+      participantCount={participantCount}
+      myClientId={myClientId}
+      peerUsernames={peerUsernames}
+      myPubKeyRaw={myPubKeyRaw}
+      peerPubKeys={peerPubKeys}
     />
   );
 }
@@ -269,7 +329,18 @@ function JoinerChat({
     setLocalUsername,
     mediaKeyRaw,
     error,
-  } = useChatAsJoiner(roomId, creatorPubKey, initialRoomSettings, voiceHandlerRef);
+    participantCount,
+    myClientId,
+    peerUsernames,
+    myPubKeyRaw,
+    peerPubKeys,
+  } = useGroupChat(
+    roomId,
+    'joiner',
+    creatorPubKey,
+    voiceHandlerRef,
+    initialRoomSettings,
+  );
 
   const voice = useVoiceCall({
     sendSignal: sendVoiceSignal,
@@ -305,20 +376,28 @@ function JoinerChat({
       peerUsername={peerUsername}
       onSetLocalUsername={setLocalUsername}
       voice={voice}
+      participantCount={participantCount}
+      myClientId={myClientId}
+      peerUsernames={peerUsernames}
+      myPubKeyRaw={myPubKeyRaw}
+      peerPubKeys={peerPubKeys}
     />
   );
 }
 
-function deriveConnectionQuality(phase: string, msgs: ChatMessage[]): ConnectionQuality {
-  if (phase === 'peer-disconnected') return 'degraded'
+function deriveConnectionQuality(
+  phase: string,
+  msgs: ChatMessage[],
+): ConnectionQuality {
+  if (phase === 'peer-disconnected') return 'degraded';
   for (let i = msgs.length - 1; i >= 0; i--) {
-    const msg = msgs[i]
-    if (msg?.sender !== 'system') continue
-    if (msg.text === 'Connection lost, reconnecting...') return 'reconnecting'
-    if (msg.text === 'Failed to reconnect') return 'lost'
-    break
+    const msg = msgs[i];
+    if (msg?.sender !== 'system') continue;
+    if (msg.text === 'Connection lost, reconnecting...') return 'reconnecting';
+    if (msg.text === 'Failed to reconnect') return 'lost';
+    break;
   }
-  return 'good'
+  return 'good';
 }
 
 // computeWaveform extracted to @/utils/compute-waveform
@@ -360,12 +439,26 @@ interface ChatViewProps {
   onReact: (msgId: string, emoji: string, action: 'add' | 'remove') => void;
   onRemoveTimedMessage: (msgId: string) => void;
   onTyping: (active: boolean) => void;
-  onSendVoiceNote: (blob: Blob, durationMs: number, mimeType: string, timed?: boolean) => Promise<void>;
+  onSendVoiceNote: (
+    blob: Blob,
+    durationMs: number,
+    mimeType: string,
+    timed?: boolean,
+  ) => Promise<void>;
   onSendFile: (file: File, timed?: boolean) => Promise<void>;
   onSendTimedConsumed: (noteId: string) => Promise<void>;
-  onSendPoll: (question: string, questionEmoji: string, options: Array<{ text: string; emoji: string }>, allowMultiple: boolean) => Promise<void>;
+  onSendPoll: (
+    question: string,
+    questionEmoji: string,
+    options: Array<{ text: string; emoji: string }>,
+    allowMultiple: boolean,
+  ) => Promise<void>;
   onPollVote: (pollId: string, optionIndices: number[]) => Promise<void>;
-  onSendGallery: (files: File[], caption?: string, timed?: boolean) => Promise<void>;
+  onSendGallery: (
+    files: File[],
+    caption?: string,
+    timed?: boolean,
+  ) => Promise<void>;
   onSendNotefade: (url: string) => Promise<void>;
   onEnd: () => void;
   onEndForAll: () => void;
@@ -376,6 +469,11 @@ interface ChatViewProps {
   peerUsername: string | null;
   onSetLocalUsername: (username: string) => Promise<void>;
   voice: VoiceState;
+  participantCount: number;
+  myClientId: string | null;
+  peerUsernames: Map<string, string | null>;
+  myPubKeyRaw: Uint8Array | null;
+  peerPubKeys: Map<string, Uint8Array>;
 }
 
 function ChatView({
@@ -404,6 +502,11 @@ function ChatView({
   peerUsername,
   onSetLocalUsername,
   voice,
+  participantCount,
+  myClientId,
+  peerUsernames,
+  myPubKeyRaw,
+  peerPubKeys,
 }: ChatViewProps) {
   const [showEndConfirm, setShowEndConfirm] = useState(false);
   const [showEndForMeOptions, setShowEndForMeOptions] = useState(false);
@@ -414,16 +517,25 @@ function ChatView({
   const [voiceNoteError, setVoiceNoteError] = useState<string | null>(null);
   const [isSendingVoiceNote, setIsSendingVoiceNote] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
-  const [voiceNoteSizeWarningSeconds, setVoiceNoteSizeWarningSeconds] = useState<number | null>(null);
-  const [voiceNoteTimeWarningSeconds, setVoiceNoteTimeWarningSeconds] = useState<number | null>(null);
+  const [voiceNoteSizeWarningSeconds, setVoiceNoteSizeWarningSeconds] =
+    useState<number | null>(null);
+  const [voiceNoteTimeWarningSeconds, setVoiceNoteTimeWarningSeconds] =
+    useState<number | null>(null);
   const [isRecordingPaused, setIsRecordingPaused] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewDurationMs, setPreviewDurationMs] = useState(0);
   const [previewWaveform, setPreviewWaveform] = useState<number[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [pendingSafeWordEnabled, setPendingSafeWordEnabled] = useState(Boolean(roomSettings.safeWord));
+  const [pendingSafeWordEnabled, setPendingSafeWordEnabled] = useState(
+    Boolean(roomSettings.safeWord),
+  );
   const [pendingSafeWord, setPendingSafeWord] = useState('');
-  const [pendingUsernameMode, setPendingUsernameMode] = useState(roomSettings.usernameModeEnabled);
+  const [showSafeWord, setShowSafeWord] = useState(false);
+  const [swCopied, setSwCopied] = useState(false);
+  const [pendingUsernameMode, setPendingUsernameMode] = useState(
+    roomSettings.usernameModeEnabled,
+  );
+  const [usernameManuallySet, setUsernameManuallySet] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [applyingSafeWord, setApplyingSafeWord] = useState(false);
   const [safeWordApplied, setSafeWordApplied] = useState(false);
@@ -437,21 +549,38 @@ function ChatView({
   const [inputFocusTrigger, setInputFocusTrigger] = useState(0);
   const [fileError, setFileError] = useState<string | null>(null);
   const [autoPlayNextId, setAutoPlayNextId] = useState<string | null>(null);
-  const [lightboxImage, setLightboxImage] = useState<{ url: string; fileName?: string } | null>(null);
+  const [lightboxImage, setLightboxImage] = useState<{
+    url: string;
+    fileName?: string;
+  } | null>(null);
   const [pollCreatorOpen, setPollCreatorOpen] = useState(false);
   const [photoComposerOpen, setPhotoComposerOpen] = useState(false);
   const [cameraFile, setCameraFile] = useState<File | null>(null);
   const [notefadeComposerOpen, setNotefadeComposerOpen] = useState(false);
-  const [galleryLightbox, setGalleryLightbox] = useState<{ images: GalleryImage[]; index: number } | null>(null);
+  const [galleryLightbox, setGalleryLightbox] = useState<{
+    images: GalleryImage[];
+    index: number;
+  } | null>(null);
+  const [showParticipantList, setShowParticipantList] = useState(false);
+  const [showSafetyNumber, setShowSafetyNumber] = useState(false);
+  const [pendingMaxParticipants, setPendingMaxParticipants] = useState(
+    roomSettings.maxParticipants,
+  );
   const isAtBottomRef = useRef(true);
   const timedModeRef = useRef(false);
-  const safeWordDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const recordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const safeWordDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const recordingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
+    null,
+  );
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const voiceNoteChunksRef = useRef<Blob[]>([]);
   const voiceNoteStartedAtRef = useRef<number | null>(null);
   const voiceNoteStreamRef = useRef<MediaStream | null>(null);
-  const voiceNoteAutoStopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const voiceNoteAutoStopRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const accumulatedBytesRef = useRef(0);
   const pauseStartedAtRef = useRef<number | null>(null);
   const totalPausedMsRef = useRef(0);
@@ -465,9 +594,29 @@ function ChatView({
   const { settings: localSettings, updateSetting } = useLocalChatSettings();
   const { recentEmojis, trackEmoji } = useRecentEmojis();
 
-  const { remainingSeconds, resetTimer } = useInactivityTimer(ROOM_INACTIVITY_TTL_MS);
+  const timerPaused = phase === 'creating' || phase === 'waiting'
+    || phase === 'connecting' || phase === 'key-exchange';
+  const { remainingSeconds, resetTimer } = useInactivityTimer(
+    ROOM_INACTIVITY_TTL_MS,
+    timerPaused,
+  );
 
   useNotifications(messages, phase, localSettings.soundEnabled);
+
+  const buildParticipantsList = useCallback(() => {
+    const list: Array<{
+      clientId: string;
+      username: string | null;
+      isYou: boolean;
+    }> = [];
+    if (myClientId) {
+      list.push({ clientId: myClientId, username: localUsername, isYou: true });
+    }
+    for (const [id, name] of peerUsernames) {
+      list.push({ clientId: id, username: name, isYou: false });
+    }
+    return list;
+  }, [myClientId, localUsername, peerUsernames]);
 
   // Reset inactivity timer on any new message (sent or received)
   useEffect(() => {
@@ -480,10 +629,13 @@ function ChatView({
   }, [peerTyping, resetTimer]);
 
   // Wrap onTyping to also reset inactivity timer
-  const handleTyping = useCallback((active: boolean) => {
-    if (active) resetTimer();
-    onTyping(active);
-  }, [onTyping, resetTimer]);
+  const handleTyping = useCallback(
+    (active: boolean) => {
+      if (active) resetTimer();
+      onTyping(active);
+    },
+    [onTyping, resetTimer],
+  );
 
   const handleCopy = useCallback(async () => {
     if (!inviteUrl || copyState !== 'idle') return;
@@ -506,80 +658,102 @@ function ChatView({
     window.location.hash = '';
   }, []);
 
-  const handleSend = useCallback((text: string) => {
-    onSend(text, replyingTo?.id);
-    setReplyingTo(null);
-  }, [onSend, replyingTo]);
+  const handleSend = useCallback(
+    (text: string) => {
+      onSend(text, replyingTo?.id);
+      setReplyingTo(null);
+    },
+    [onSend, replyingTo],
+  );
 
-  const handleSendTimed = useCallback((text: string) => {
-    onSend(text, replyingTo?.id, true);
-    setReplyingTo(null);
-  }, [onSend, replyingTo]);
+  const handleSendTimed = useCallback(
+    (text: string) => {
+      onSend(text, replyingTo?.id, true);
+      setReplyingTo(null);
+    },
+    [onSend, replyingTo],
+  );
 
-  const handleSendPoll = useCallback(async (
-    question: string,
-    questionEmoji: string,
-    options: Array<{ text: string; emoji: string }>,
-    allowMultiple: boolean,
-  ) => {
-    await onSendPoll(question, questionEmoji, options, allowMultiple);
-    setPollCreatorOpen(false);
-  }, [onSendPoll]);
+  const handleSendPoll = useCallback(
+    async (
+      question: string,
+      questionEmoji: string,
+      options: Array<{ text: string; emoji: string }>,
+      allowMultiple: boolean,
+    ) => {
+      await onSendPoll(question, questionEmoji, options, allowMultiple);
+      setPollCreatorOpen(false);
+    },
+    [onSendPoll],
+  );
 
-  const handleSendGallery = useCallback(async (files: File[], caption?: string, timed?: boolean) => {
-    await onSendGallery(files, caption, timed);
-    setPhotoComposerOpen(false);
-    setCameraFile(null);
-  }, [onSendGallery]);
+  const handleSendGallery = useCallback(
+    async (files: File[], caption?: string, timed?: boolean) => {
+      await onSendGallery(files, caption, timed);
+      setPhotoComposerOpen(false);
+      setCameraFile(null);
+    },
+    [onSendGallery],
+  );
 
   const handleCameraCapture = useCallback((file: File) => {
     setCameraFile(file);
     setPhotoComposerOpen(true);
   }, []);
 
-  const handleNotefadeSend = useCallback(async (noteText: string) => {
-    try {
-      const url = await createNotefadeNote(noteText);
-      await onSendNotefade(url);
-    } catch {
-      // silently fail — the note creation failed upstream
-    } finally {
-      setNotefadeComposerOpen(false);
-    }
-  }, [onSendNotefade]);
+  const handleNotefadeSend = useCallback(
+    async (noteText: string) => {
+      try {
+        const url = await createNotefadeNote(noteText);
+        await onSendNotefade(url);
+      } catch {
+        // silently fail — the note creation failed upstream
+      } finally {
+        setNotefadeComposerOpen(false);
+      }
+    },
+    [onSendNotefade],
+  );
 
-  const handleSendFile = useCallback((file: File) => {
-    setFileError(null);
-    const maxBytes = IMAGE_MIME_TYPES.has(file.type) ? FILE_MAX_IMAGE_BYTES : FILE_MAX_GENERAL_BYTES;
-    if (file.size === 0) {
-      setFileError('File is empty');
-      return;
-    }
-    if (file.size > maxBytes) {
-      const limitMB = Math.round(maxBytes / (1024 * 1024));
-      setFileError(`File too large (max ${limitMB} MB)`);
-      return;
-    }
-    onSendFile(file)
-      .catch(() => setFileError('Failed to send file'));
-  }, [onSendFile]);
+  const handleSendFile = useCallback(
+    (file: File) => {
+      setFileError(null);
+      const maxBytes = IMAGE_MIME_TYPES.has(file.type)
+        ? FILE_MAX_IMAGE_BYTES
+        : FILE_MAX_GENERAL_BYTES;
+      if (file.size === 0) {
+        setFileError('File is empty');
+        return;
+      }
+      if (file.size > maxBytes) {
+        const limitMB = Math.round(maxBytes / (1024 * 1024));
+        setFileError(`File too large (max ${limitMB} MB)`);
+        return;
+      }
+      onSendFile(file).catch(() => setFileError('Failed to send file'));
+    },
+    [onSendFile],
+  );
 
-  const handleGalleryImageClick = useCallback((gallery: GalleryImage[], index: number) => {
-    setGalleryLightbox({ images: gallery, index });
-  }, []);
+  const handleGalleryImageClick = useCallback(
+    (gallery: GalleryImage[], index: number) => {
+      setGalleryLightbox({ images: gallery, index });
+    },
+    [],
+  );
 
   const handleCopyMessage = useCallback(async (text: string) => {
     try {
-      await navigator.clipboard.writeText(text)
+      await navigator.clipboard.writeText(text);
     } catch {
-      const input = document.createElement('input')
-      input.value = text
-      document.body.appendChild(input)
-      input.select()
-      document.execCommand('copy')
-      document.body.removeChild(input)
+      const input = document.createElement('input');
+      input.value = text;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      document.body.removeChild(input);
     }
-  }, [])
+  }, []);
 
   const scrollToMessage = useCallback((targetMsgId: string) => {
     const el = document.querySelector(`[data-msg-id="${targetMsgId}"]`);
@@ -594,39 +768,52 @@ function ChatView({
     el.addEventListener('animationend', onEnd);
   }, []);
 
-  const handleReact = useCallback((msgId: string, emoji: string) => {
-    const msg = messages.find(m => m.id === msgId);
-    if (!msg) return;
-    const alreadyReacted = msg.reactions.some(r => r.emoji === emoji && r.fromSelf);
-    trackEmoji(emoji);
-    onReact(msgId, emoji, alreadyReacted ? 'remove' : 'add');
-  }, [messages, onReact, trackEmoji]);
+  const handleReact = useCallback(
+    (msgId: string, emoji: string) => {
+      const msg = messages.find((m) => m.id === msgId);
+      if (!msg) return;
+      const alreadyReacted = msg.reactions.some(
+        (r) => r.emoji === emoji && r.fromSelf,
+      );
+      trackEmoji(emoji);
+      onReact(msgId, emoji, alreadyReacted ? 'remove' : 'add');
+    },
+    [messages, onReact, trackEmoji],
+  );
 
-  const handleTimedExpire = useCallback((msgId: string) => {
-    onRemoveTimedMessage(msgId);
-  }, [onRemoveTimedMessage]);
+  const handleTimedExpire = useCallback(
+    (msgId: string) => {
+      onRemoveTimedMessage(msgId);
+    },
+    [onRemoveTimedMessage],
+  );
 
+  const handlePlayOnceComplete = useCallback(
+    (msgId: string) => {
+      onSendTimedConsumed(msgId);
+    },
+    [onSendTimedConsumed],
+  );
 
-  const handlePlayOnceComplete = useCallback((msgId: string) => {
-    onSendTimedConsumed(msgId);
-  }, [onSendTimedConsumed]);
-
-  const handleAudioEnded = useCallback((msgId: string) => {
-    const idx = messages.findIndex(m => m.id === msgId);
-    if (idx === -1 || idx >= messages.length - 1) {
-      setAutoPlayNextId(null);
-      return;
-    }
-    const next = messages[idx + 1];
-    if (next && next.kind === 'audio' && next.audioUrl) {
-      setAutoPlayNextId(next.id);
-    } else {
-      setAutoPlayNextId(null);
-    }
-  }, [messages]);
+  const handleAudioEnded = useCallback(
+    (msgId: string) => {
+      const idx = messages.findIndex((m) => m.id === msgId);
+      if (idx === -1 || idx >= messages.length - 1) {
+        setAutoPlayNextId(null);
+        return;
+      }
+      const next = messages[idx + 1];
+      if (next && next.kind === 'audio' && next.audioUrl) {
+        setAutoPlayNextId(next.id);
+      } else {
+        setAutoPlayNextId(null);
+      }
+    },
+    [messages],
+  );
 
   useEffect(() => {
-    if (autoPlayNextId && !messages.some(m => m.id === autoPlayNextId)) {
+    if (autoPlayNextId && !messages.some((m) => m.id === autoPlayNextId)) {
       setAutoPlayNextId(null);
     }
   }, [messages, autoPlayNextId]);
@@ -652,7 +839,9 @@ function ChatView({
     } else if (isAtBottomRef.current) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     } else {
-      const newPeerMessages = messages.slice(-added).filter((m) => m.sender === 'peer');
+      const newPeerMessages = messages
+        .slice(-added)
+        .filter((m) => m.sender === 'peer');
       if (newPeerMessages.length > 0) {
         setUnreadBelow((prev) => prev + newPeerMessages.length);
       }
@@ -676,7 +865,10 @@ function ChatView({
   useEffect(() => {
     if (!localSettingsOpen) return;
     const handler = (e: MouseEvent) => {
-      if (localSettingsRef.current && !localSettingsRef.current.contains(e.target as Node)) {
+      if (
+        localSettingsRef.current &&
+        !localSettingsRef.current.contains(e.target as Node)
+      ) {
         setLocalSettingsOpen(false);
       }
     };
@@ -722,7 +914,10 @@ function ChatView({
       if (recordingIntervalRef.current) {
         clearInterval(recordingIntervalRef.current);
       }
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      if (
+        mediaRecorderRef.current &&
+        mediaRecorderRef.current.state !== 'inactive'
+      ) {
         mediaRecorderRef.current.stop();
       }
       if (voiceNoteStreamRef.current) {
@@ -774,7 +969,6 @@ function ChatView({
     setPreviewWaveform([]);
   }, []);
 
-
   const startVoiceNoteRecording = useCallback(async () => {
     if (isRecordingNote || isSendingVoiceNote) return;
     setVoiceNoteError(null);
@@ -801,11 +995,15 @@ function ChatView({
           voiceNoteChunksRef.current.push(event.data);
           accumulatedBytesRef.current += event.data.size;
 
-          const elapsedMs = Date.now() - (voiceNoteStartedAtRef.current ?? Date.now()) - totalPausedMsRef.current;
+          const elapsedMs =
+            Date.now() -
+            (voiceNoteStartedAtRef.current ?? Date.now()) -
+            totalPausedMsRef.current;
           const elapsedSeconds = elapsedMs / 1000;
           if (elapsedSeconds > 0) {
             const bytesPerSecond = accumulatedBytesRef.current / elapsedSeconds;
-            const maxBytes = VOICE_NOTE_MAX_BYTES * VOICE_NOTE_SIZE_SAFETY_RATIO;
+            const maxBytes =
+              VOICE_NOTE_MAX_BYTES * VOICE_NOTE_SIZE_SAFETY_RATIO;
             const remainingBytes = maxBytes - accumulatedBytesRef.current;
 
             if (remainingBytes <= 0) {
@@ -824,7 +1022,12 @@ function ChatView({
       recorder.onstop = () => {
         const mimeType = recorder.mimeType || 'audio/webm';
         const blob = new Blob(voiceNoteChunksRef.current, { type: mimeType });
-        const durationMs = Math.max(0, Date.now() - (voiceNoteStartedAtRef.current ?? Date.now()) - totalPausedMsRef.current);
+        const durationMs = Math.max(
+          0,
+          Date.now() -
+            (voiceNoteStartedAtRef.current ?? Date.now()) -
+            totalPausedMsRef.current,
+        );
         const wasTimed = timedModeRef.current;
         timedModeRef.current = false;
 
@@ -853,8 +1056,11 @@ function ChatView({
       recordingIntervalRef.current = setInterval(() => {
         setRecordingDuration((prev) => {
           const next = prev + 1;
-          const remainingS = (VOICE_NOTE_MAX_DURATION_MS / 1000) - next;
-          if (remainingS <= VOICE_NOTE_DURATION_WARNING_THRESHOLD_S && remainingS > 0) {
+          const remainingS = VOICE_NOTE_MAX_DURATION_MS / 1000 - next;
+          if (
+            remainingS <= VOICE_NOTE_DURATION_WARNING_THRESHOLD_S &&
+            remainingS > 0
+          ) {
             setVoiceNoteTimeWarningSeconds(remainingS);
           } else {
             setVoiceNoteTimeWarningSeconds(null);
@@ -873,7 +1079,12 @@ function ChatView({
       setVoiceNoteError('Microphone permission denied');
       clearVoiceNoteRecorder();
     }
-  }, [clearVoiceNoteRecorder, onSendVoiceNote, isRecordingNote, isSendingVoiceNote]);
+  }, [
+    clearVoiceNoteRecorder,
+    onSendVoiceNote,
+    isRecordingNote,
+    isSendingVoiceNote,
+  ]);
 
   const stopVoiceNoteRecording = useCallback(() => {
     const recorder = mediaRecorderRef.current;
@@ -917,7 +1128,12 @@ function ChatView({
       // Compute waveform and preview URL from recorded chunks so far
       const mimeType = recorder.mimeType || 'audio/webm';
       const blob = new Blob(voiceNoteChunksRef.current, { type: mimeType });
-      const durationMs = Math.max(0, Date.now() - (voiceNoteStartedAtRef.current ?? Date.now()) - totalPausedMsRef.current);
+      const durationMs = Math.max(
+        0,
+        Date.now() -
+          (voiceNoteStartedAtRef.current ?? Date.now()) -
+          totalPausedMsRef.current,
+      );
 
       const waveform = await computeWaveform(blob);
       const url = URL.createObjectURL(blob);
@@ -942,8 +1158,11 @@ function ChatView({
       recordingIntervalRef.current = setInterval(() => {
         setRecordingDuration((prev) => {
           const next = prev + 1;
-          const remainingS = (VOICE_NOTE_MAX_DURATION_MS / 1000) - next;
-          if (remainingS <= VOICE_NOTE_DURATION_WARNING_THRESHOLD_S && remainingS > 0) {
+          const remainingS = VOICE_NOTE_MAX_DURATION_MS / 1000 - next;
+          if (
+            remainingS <= VOICE_NOTE_DURATION_WARNING_THRESHOLD_S &&
+            remainingS > 0
+          ) {
             setVoiceNoteTimeWarningSeconds(remainingS);
           } else {
             setVoiceNoteTimeWarningSeconds(null);
@@ -952,8 +1171,14 @@ function ChatView({
         });
       }, 1000);
       // Recalculate auto-stop from remaining recording time
-      const elapsedRecordingMs = Date.now() - (voiceNoteStartedAtRef.current ?? Date.now()) - totalPausedMsRef.current;
-      const remainingMs = Math.max(0, VOICE_NOTE_MAX_DURATION_MS - elapsedRecordingMs);
+      const elapsedRecordingMs =
+        Date.now() -
+        (voiceNoteStartedAtRef.current ?? Date.now()) -
+        totalPausedMsRef.current;
+      const remainingMs = Math.max(
+        0,
+        VOICE_NOTE_MAX_DURATION_MS - elapsedRecordingMs,
+      );
       voiceNoteAutoStopRef.current = setTimeout(() => {
         const rec = mediaRecorderRef.current;
         if (rec && rec.state !== 'inactive') {
@@ -988,44 +1213,58 @@ function ChatView({
     }
   }, []);
 
-  const applySafeWord = useCallback(async (word: string) => {
-    if (!onUpdateRoomSettings) return;
-    setApplyingSafeWord(true);
-    setSettingsError(null);
-    try {
-      const safeWord = await createSafeWordSettings(word);
-      onUpdateRoomSettings({
-        usernameModeEnabled: pendingUsernameMode,
-        safeWord,
-      });
-      setPendingSafeWord('');
-      setSafeWordApplied(true);
-      if (safeWordAppliedRef.current) clearTimeout(safeWordAppliedRef.current);
-      safeWordAppliedRef.current = setTimeout(() => setSafeWordApplied(false), 2000);
-    } catch {
-      setSettingsError('Failed to apply safe word.');
-    } finally {
-      setApplyingSafeWord(false);
-    }
-  }, [onUpdateRoomSettings, pendingUsernameMode]);
+  const applySafeWord = useCallback(
+    async (word: string) => {
+      if (!onUpdateRoomSettings) return;
+      setApplyingSafeWord(true);
+      setSettingsError(null);
+      try {
+        const safeWord = await createSafeWordSettings(word);
+        onUpdateRoomSettings({
+          ...roomSettings,
+          usernameModeEnabled: pendingUsernameMode,
+          safeWord,
+        });
+        setSafeWordApplied(true);
+        if (safeWordAppliedRef.current)
+          clearTimeout(safeWordAppliedRef.current);
+        safeWordAppliedRef.current = setTimeout(
+          () => setSafeWordApplied(false),
+          2000,
+        );
+      } catch {
+        setSettingsError('Failed to apply safe word.');
+      } finally {
+        setApplyingSafeWord(false);
+      }
+    },
+    [onUpdateRoomSettings, pendingUsernameMode],
+  );
 
-  const debounceSafeWord = useCallback((word: string) => {
-    clearSafeWordDebounce();
-    safeWordDebounceRef.current = setTimeout(() => {
-      const trimmed = word.trim();
-      if (!trimmed || !pendingSafeWordEnabled) return;
-      void applySafeWord(trimmed);
-    }, 800);
-  }, [applySafeWord, clearSafeWordDebounce, pendingSafeWordEnabled]);
+  const debounceSafeWord = useCallback(
+    (word: string) => {
+      clearSafeWordDebounce();
+      safeWordDebounceRef.current = setTimeout(() => {
+        const trimmed = word.trim();
+        if (!trimmed || !pendingSafeWordEnabled) return;
+        void applySafeWord(trimmed);
+      }, 800);
+    },
+    [applySafeWord, clearSafeWordDebounce, pendingSafeWordEnabled],
+  );
+
+  const usernameForced = pendingMaxParticipants > 2;
 
   const toggleUsernameMode = useCallback(() => {
     const next = !pendingUsernameMode;
     setPendingUsernameMode(next);
+    setUsernameManuallySet(next);
     onUpdateRoomSettings?.({
+      ...roomSettings,
       usernameModeEnabled: next,
       safeWord: roomSettings.safeWord,
     });
-  }, [onUpdateRoomSettings, pendingUsernameMode, roomSettings.safeWord]);
+  }, [onUpdateRoomSettings, pendingUsernameMode, roomSettings]);
 
   const toggleSafeWord = useCallback(() => {
     const next = !pendingSafeWordEnabled;
@@ -1036,22 +1275,33 @@ function ChatView({
       clearSafeWordDebounce();
       setPendingSafeWord('');
       onUpdateRoomSettings?.({
+        ...roomSettings,
         usernameModeEnabled: pendingUsernameMode,
         safeWord: null,
       });
     } else if (roomSettings.safeWord) {
       onUpdateRoomSettings?.({
+        ...roomSettings,
         usernameModeEnabled: pendingUsernameMode,
         safeWord: roomSettings.safeWord,
       });
     }
-  }, [clearSafeWordDebounce, onUpdateRoomSettings, pendingSafeWordEnabled, pendingUsernameMode, roomSettings.safeWord]);
+  }, [
+    clearSafeWordDebounce,
+    onUpdateRoomSettings,
+    pendingSafeWordEnabled,
+    pendingUsernameMode,
+    roomSettings.safeWord,
+  ]);
 
-  const handleSafeWordInput = useCallback((value: string) => {
-    setPendingSafeWord(value);
-    setSafeWordApplied(false);
-    debounceSafeWord(value);
-  }, [debounceSafeWord]);
+  const handleSafeWordInput = useCallback(
+    (value: string) => {
+      setPendingSafeWord(value);
+      setSafeWordApplied(false);
+      debounceSafeWord(value);
+    },
+    [debounceSafeWord],
+  );
 
   const flushPendingSafeWord = useCallback(() => {
     clearSafeWordDebounce();
@@ -1059,26 +1309,34 @@ function ChatView({
     if (trimmed && pendingSafeWordEnabled) {
       void applySafeWord(trimmed);
     }
-  }, [applySafeWord, clearSafeWordDebounce, pendingSafeWord, pendingSafeWordEnabled]);
+  }, [
+    applySafeWord,
+    clearSafeWordDebounce,
+    pendingSafeWord,
+    pendingSafeWordEnabled,
+  ]);
 
-  const submitUsername = useCallback(async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (usernameBusy) return;
-    const trimmed = pendingUsername.trim().slice(0, USERNAME_MAX_LENGTH);
-    if (!trimmed) {
-      setUsernameError('Username is required.');
-      return;
-    }
-    setUsernameBusy(true);
-    setUsernameError(null);
-    try {
-      await onSetLocalUsername(trimmed);
-    } catch {
-      setUsernameError('Failed to set username.');
-    } finally {
-      setUsernameBusy(false);
-    }
-  }, [onSetLocalUsername, pendingUsername, usernameBusy]);
+  const submitUsername = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      if (usernameBusy) return;
+      const trimmed = pendingUsername.trim().slice(0, USERNAME_MAX_LENGTH);
+      if (!trimmed) {
+        setUsernameError('Username is required.');
+        return;
+      }
+      setUsernameBusy(true);
+      setUsernameError(null);
+      try {
+        await onSetLocalUsername(trimmed);
+      } catch {
+        setUsernameError('Failed to set username.');
+      } finally {
+        setUsernameBusy(false);
+      }
+    },
+    [onSetLocalUsername, pendingUsername, usernameBusy],
+  );
 
   if (phase === 'creating' || phase === 'connecting') {
     return (
@@ -1091,6 +1349,24 @@ function ChatView({
   }
 
   if (phase === 'waiting') {
+    const handleMaxParticipantsChange = (value: number) => {
+      setPendingMaxParticipants(value);
+      let nextUsernameMode = pendingUsernameMode;
+      if (value > 2 && !pendingUsernameMode) {
+        nextUsernameMode = true;
+        setPendingUsernameMode(true);
+      } else if (value <= 2 && !usernameManuallySet && pendingUsernameMode) {
+        nextUsernameMode = false;
+        setPendingUsernameMode(false);
+      }
+      onUpdateRoomSettings?.({
+        ...roomSettings,
+        maxParticipants: value,
+        usernameModeEnabled: nextUsernameMode,
+        safeWord: roomSettings.safeWord,
+      });
+    };
+
     return (
       <div className={styles.wrapper}>
         <div className={styles.waitingLayout}>
@@ -1098,7 +1374,9 @@ function ChatView({
             {inviteUrl && (
               <>
                 <p className={styles.inviteLabel}>
-                  Share this link with your partner:
+                  {pendingMaxParticipants > 2
+                    ? `Share this link with up to ${pendingMaxParticipants - 1} others`
+                    : 'Share this link with your partner'}
                 </p>
                 <div className={styles.inviteRow}>
                   <div
@@ -1118,24 +1396,12 @@ function ChatView({
                           onClick={handleCopy}
                           title={copied ? 'copied' : 'copy to clipboard'}
                         >
-                          {copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
+                          {copied ? (
+                            <IconCheck size={16} />
+                          ) : (
+                            <IconCopy size={16} />
+                          )}
                         </button>
-                        {onUpdateRoomSettings && (
-                          <button
-                            type='button'
-                            className={`${styles.gearButton} ${settingsOpen ? styles.gearButtonActive : ''}`}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSettingsOpen((prev) => {
-                                if (prev) flushPendingSafeWord();
-                                return !prev;
-                              });
-                            }}
-                            title='Chat room settings'
-                          >
-                            <IconGear size={21} />
-                          </button>
-                        )}
                       </div>
                       <QrCode url={inviteUrl} size={48} />
                       {copied && (
@@ -1146,53 +1412,253 @@ function ChatView({
                         </span>
                       )}
                     </div>
-                    {onUpdateRoomSettings && (settingsOpen || roomSettings.safeWord || roomSettings.usernameModeEnabled) && (
+                    {onUpdateRoomSettings && (
                       <div className={styles.inviteBoxSettings}>
-                        {!settingsOpen && (
-                          <div className={styles.activeSettings}>
-                            {roomSettings.safeWord && (
-                              <span className={styles.activeSettingTag}>Safe word agreement</span>
-                            )}
-                            {roomSettings.usernameModeEnabled && (
-                              <span className={styles.activeSettingTag}>Username mode</span>
-                            )}
+                        <div className={styles.sliderRow}>
+                          <span className={styles.sliderLabel}>
+                            Participants{' '}
+                            <span className={styles.sliderValue}>
+                              {pendingMaxParticipants}
+                            </span>
+                          </span>
+                          <input
+                            type='range'
+                            min={2}
+                            max={20}
+                            value={pendingMaxParticipants}
+                            onChange={(e) =>
+                              handleMaxParticipantsChange(
+                                Number(e.target.value),
+                              )
+                            }
+                            className={styles.participantSlider}
+                          />
+                          <button
+                            type='button'
+                            className={`${styles.gearButton} ${settingsOpen ? styles.gearButtonActive : ''}`}
+                            onClick={() => {
+                              setSettingsOpen((prev) => {
+                                if (prev) flushPendingSafeWord();
+                                return !prev;
+                              });
+                            }}
+                            title='Chat room settings'
+                          >
+                            <IconGear size={18} />
+                          </button>
+                        </div>
+                        {(usernameForced || pendingUsernameMode || settingsOpen) && (
+                          <div
+                            className={styles.settingsRow}
+                            style={{ width: '100%', animation: 'settingsFadeIn 0.2s ease-out' }}
+                          >
+                            <label className={styles.settingsLabel}>
+                              Username mode
+                            </label>
+                            <OnOffToggle
+                              enabled={pendingUsernameMode}
+                              onToggle={toggleUsernameMode}
+                              disabled={usernameForced}
+                            />
                           </div>
                         )}
-                        {settingsOpen && (
-                          <div className={styles.settingsPanel}>
-                            <div className={styles.settingsRow}>
-                              <label className={styles.settingsLabel}>Safe word agreement</label>
-                              <OnOffToggle
-                                enabled={pendingSafeWordEnabled}
-                                onToggle={toggleSafeWord}
-                              />
-                            </div>
-                            {pendingSafeWordEnabled && (
-                              <>
-                                <input
-                                  type='password'
-                                  className={styles.settingsInput}
-                                  value={pendingSafeWord}
-                                  onChange={(event) => handleSafeWordInput(event.target.value)}
-                                  placeholder={roomSettings.safeWord ? 'Keep existing safe word' : 'Enter safe word'}
-                                />
-                                {applyingSafeWord && (
-                                  <p className={styles.settingsHint}>Applying...</p>
-                                )}
-                                {safeWordApplied && !applyingSafeWord && (
-                                  <p className={styles.settingsHintSuccess}>Safe word set</p>
-                                )}
-                              </>
-                            )}
-                            <div className={styles.settingsRow}>
-                              <label className={styles.settingsLabel}>Username mode</label>
-                              <OnOffToggle
-                                enabled={pendingUsernameMode}
-                                onToggle={toggleUsernameMode}
-                              />
-                            </div>
-                            {settingsError && <p className={styles.settingsError}>{settingsError}</p>}
+                        {(pendingSafeWordEnabled || settingsOpen) && (
+                          <div
+                            className={styles.settingsRow}
+                            style={{ width: '100%', animation: 'settingsFadeIn 0.2s ease-out' }}
+                          >
+                            <label className={styles.settingsLabel}>
+                              Safe word agreement
+                            </label>
+                            <OnOffToggle
+                              enabled={pendingSafeWordEnabled}
+                              onToggle={toggleSafeWord}
+                            />
                           </div>
+                        )}
+                        {pendingSafeWordEnabled && (
+                          <>
+                            <span className={styles.safeWordInputWrapper}>
+                              <input
+                                type={showSafeWord ? 'text' : 'password'}
+                                className={styles.safeWordInlineInput}
+                                value={pendingSafeWord}
+                                onChange={(event) =>
+                                  handleSafeWordInput(event.target.value)
+                                }
+                                placeholder={
+                                  roomSettings.safeWord
+                                    ? 'Keep existing safe word'
+                                    : 'Enter safe word'
+                                }
+                                spellCheck={false}
+                                autoComplete='off'
+                              />
+                              <button
+                                type='button'
+                                className={`${styles.copySafeWordButton} ${swCopied ? styles.copySafeWordButtonCopied : ''}`}
+                                onClick={() => {
+                                  if (swCopied) return;
+                                  void navigator.clipboard.writeText(pendingSafeWord);
+                                  setSwCopied(true);
+                                  setTimeout(() => setSwCopied(false), 2000);
+                                }}
+                                title={swCopied ? 'copied' : 'copy safe word'}
+                                tabIndex={-1}
+                                disabled={pendingSafeWord.length === 0}
+                              >
+                                {swCopied ? (
+                                  <svg
+                                    width='14'
+                                    height='14'
+                                    viewBox='0 0 14 14'
+                                    fill='none'
+                                  >
+                                    <path
+                                      d='M3 7.5L5.5 10L11 4.5'
+                                      stroke='#22c55e'
+                                      strokeWidth='1.5'
+                                      strokeLinecap='round'
+                                      strokeLinejoin='round'
+                                    />
+                                  </svg>
+                                ) : (
+                                  <svg
+                                    width='14'
+                                    height='14'
+                                    viewBox='0 0 14 14'
+                                    fill='none'
+                                  >
+                                    <rect
+                                      x='4.5'
+                                      y='4.5'
+                                      width='7'
+                                      height='7'
+                                      rx='1.5'
+                                      stroke='currentColor'
+                                      strokeWidth='1.2'
+                                    />
+                                    <path
+                                      d='M9.5 4.5V3a1.5 1.5 0 00-1.5-1.5H3A1.5 1.5 0 001.5 3v5A1.5 1.5 0 003 9.5h1.5'
+                                      stroke='currentColor'
+                                      strokeWidth='1.2'
+                                    />
+                                  </svg>
+                                )}
+                              </button>
+                              <button
+                                type='button'
+                                className={styles.showSafeWordButton}
+                                onClick={() => setShowSafeWord((prev) => !prev)}
+                                tabIndex={-1}
+                              >
+                                {showSafeWord ? (
+                                  <svg
+                                    width='14'
+                                    height='14'
+                                    viewBox='0 0 14 14'
+                                    fill='none'
+                                  >
+                                    <path
+                                      d='M1.5 7s2.2-3.5 5.5-3.5S12.5 7 12.5 7s-2.2 3.5-5.5 3.5S1.5 7 1.5 7z'
+                                      stroke='currentColor'
+                                      strokeWidth='1.2'
+                                      strokeLinecap='round'
+                                      strokeLinejoin='round'
+                                    />
+                                    <circle
+                                      cx='7'
+                                      cy='7'
+                                      r='1.8'
+                                      stroke='currentColor'
+                                      strokeWidth='1.2'
+                                    />
+                                  </svg>
+                                ) : (
+                                  <svg
+                                    width='14'
+                                    height='14'
+                                    viewBox='0 0 14 14'
+                                    fill='none'
+                                  >
+                                    <path
+                                      d='M2 2l10 10M5.6 5.7a1.8 1.8 0 002.7 2.6'
+                                      stroke='currentColor'
+                                      strokeWidth='1.2'
+                                      strokeLinecap='round'
+                                      strokeLinejoin='round'
+                                    />
+                                    <path
+                                      d='M4 4.3C2.7 5.2 1.5 7 1.5 7s2.2 3.5 5.5 3.5c1 0 1.9-.3 2.7-.8M9.5 9.2c1.5-1 2.9-2.7 3-2.7s-2.2-3.5-5.5-3.5c-.6 0-1.2.1-1.7.3'
+                                      stroke='currentColor'
+                                      strokeWidth='1.2'
+                                      strokeLinecap='round'
+                                      strokeLinejoin='round'
+                                    />
+                                  </svg>
+                                )}
+                              </button>
+                              <button
+                                type='button'
+                                className={styles.generateSafeWordButton}
+                                onClick={() => {
+                                  handleSafeWordInput(generateSafeWord());
+                                  setShowSafeWord(true);
+                                }}
+                                title='generate random safe word'
+                                tabIndex={-1}
+                              >
+                                <svg
+                                  width='14'
+                                  height='14'
+                                  viewBox='0 0 14 14'
+                                  fill='none'
+                                >
+                                  <path
+                                    d='M2.5 7a4.5 4.5 0 018.3-2.4'
+                                    stroke='currentColor'
+                                    strokeWidth='1.2'
+                                    strokeLinecap='round'
+                                  />
+                                  <path
+                                    d='M11.5 7a4.5 4.5 0 01-8.3 2.4'
+                                    stroke='currentColor'
+                                    strokeWidth='1.2'
+                                    strokeLinecap='round'
+                                  />
+                                  <path
+                                    d='M10.2 2.2l.6 2.4-2.4-.6'
+                                    stroke='currentColor'
+                                    strokeWidth='1.2'
+                                    strokeLinecap='round'
+                                    strokeLinejoin='round'
+                                  />
+                                  <path
+                                    d='M3.8 11.8l-.6-2.4 2.4.6'
+                                    stroke='currentColor'
+                                    strokeWidth='1.2'
+                                    strokeLinecap='round'
+                                    strokeLinejoin='round'
+                                  />
+                                </svg>
+                              </button>
+                            </span>
+                            {applyingSafeWord && (
+                              <p className={styles.settingsHint}>
+                                Applying...
+                              </p>
+                            )}
+                            {safeWordApplied && !applyingSafeWord && (
+                              <p className={styles.settingsHintSuccess}>
+                                Safe word set
+                              </p>
+                            )}
+                            {settingsError && (
+                              <p className={styles.settingsError}>
+                                {settingsError}
+                              </p>
+                            )}
+                          </>
                         )}
                       </div>
                     )}
@@ -1203,7 +1669,9 @@ function ChatView({
           </div>
           <div className={styles.statusZone}>
             <p className={styles.waitingStatus}>
-              Waiting for partner
+              {pendingMaxParticipants > 2
+                ? 'Waiting for participants'
+                : 'Waiting for someone to join'}
               <span className={styles.waitingDot}>.</span>
               <span className={styles.waitingDot}>.</span>
               <span className={styles.waitingDot}>.</span>
@@ -1252,25 +1720,49 @@ function ChatView({
               reactions={msg.reactions}
               replyTo={msg.replyTo}
               replyPreview={msg.replyPreview}
-              onReplyClick={msg.replyTo ? () => scrollToMessage(msg.replyTo!) : undefined}
-              onCopy={msg.kind === 'text' && msg.text ? () => handleCopyMessage(msg.text ?? '') : undefined}
-              onDownload={(msg.kind === 'audio' && msg.audioUrl) || ((msg.kind === 'image' || msg.kind === 'file') && msg.fileUrl) ? () => {
-                const url = msg.audioUrl ?? msg.fileUrl;
-                if (!url) return;
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = msg.fileName ?? `file-${Date.now()}`;
-                a.click();
-              } : undefined}
+              onReplyClick={
+                msg.replyTo ? () => scrollToMessage(msg.replyTo!) : undefined
+              }
+              onCopy={
+                msg.kind === 'text' && msg.text
+                  ? () => handleCopyMessage(msg.text ?? '')
+                  : undefined
+              }
+              onDownload={
+                (msg.kind === 'audio' && msg.audioUrl) ||
+                ((msg.kind === 'image' || msg.kind === 'file') && msg.fileUrl)
+                  ? () => {
+                      const url = msg.audioUrl ?? msg.fileUrl;
+                      if (!url) return;
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = msg.fileName ?? `file-${Date.now()}`;
+                      a.click();
+                    }
+                  : undefined
+              }
               autoPlay={autoPlayNextId === msg.id}
-              onAudioEnded={msg.kind === 'audio' && msg.audioUrl ? handleAudioEnded : undefined}
-              onImageClick={msg.kind === 'image' && msg.fileUrl && !msg.timed
-                ? () => setLightboxImage({ url: msg.fileUrl!, fileName: msg.fileName })
-                : undefined}
+              onAudioEnded={
+                msg.kind === 'audio' && msg.audioUrl
+                  ? handleAudioEnded
+                  : undefined
+              }
+              onImageClick={
+                msg.kind === 'image' && msg.fileUrl && !msg.timed
+                  ? () =>
+                      setLightboxImage({
+                        url: msg.fileUrl!,
+                        fileName: msg.fileName,
+                      })
+                  : undefined
+              }
               gallery={msg.gallery}
-              onGalleryImageClick={msg.kind === 'gallery' && msg.gallery
-                ? (index: number) => handleGalleryImageClick(msg.gallery!, index)
-                : undefined}
+              onGalleryImageClick={
+                msg.kind === 'gallery' && msg.gallery
+                  ? (index: number) =>
+                      handleGalleryImageClick(msg.gallery!, index)
+                  : undefined
+              }
               notefadeUrl={msg.notefadeUrl}
               pollId={msg.pollId}
               pollQuestion={msg.pollQuestion}
@@ -1287,8 +1779,10 @@ function ChatView({
             src={galleryLightbox.images[galleryLightbox.index]?.fileUrl ?? ''}
             fileName={galleryLightbox.images[galleryLightbox.index]?.fileName}
             galleryImages={galleryLightbox.images
-              .filter((img): img is GalleryImage & { fileUrl: string } => Boolean(img.fileUrl))
-              .map(img => ({ url: img.fileUrl, fileName: img.fileName }))}
+              .filter((img): img is GalleryImage & { fileUrl: string } =>
+                Boolean(img.fileUrl),
+              )
+              .map((img) => ({ url: img.fileUrl, fileName: img.fileName }))}
             initialIndex={galleryLightbox.index}
             onClose={() => setGalleryLightbox(null)}
           />
@@ -1312,17 +1806,16 @@ function ChatView({
           disabled={true}
           maxLength={MAX_MESSAGE_LENGTH}
         />
-        <div className={styles.restartRow}>
-          {newChatButton}
-        </div>
+        <div className={styles.restartRow}>{newChatButton}</div>
       </div>
     );
   }
 
   if (phase === 'room-closed' || phase === 'expired') {
-    const endText = phase === 'expired'
-      ? 'This conversation has expired.'
-      : 'The conversation has ended.';
+    const endText =
+      phase === 'expired'
+        ? 'This conversation has expired.'
+        : 'The conversation has ended.';
     return (
       <div className={styles.wrapper}>
         <div className={styles.centered}>
@@ -1350,9 +1843,10 @@ function ChatView({
   const isPeerDisconnected = phase === 'peer-disconnected';
   const connectionQuality = deriveConnectionQuality(phase, messages);
 
-  const effectiveWarningSeconds = voiceNoteSizeWarningSeconds !== null && voiceNoteTimeWarningSeconds !== null
-    ? Math.min(voiceNoteSizeWarningSeconds, voiceNoteTimeWarningSeconds)
-    : voiceNoteSizeWarningSeconds ?? voiceNoteTimeWarningSeconds;
+  const effectiveWarningSeconds =
+    voiceNoteSizeWarningSeconds !== null && voiceNoteTimeWarningSeconds !== null
+      ? Math.min(voiceNoteSizeWarningSeconds, voiceNoteTimeWarningSeconds)
+      : (voiceNoteSizeWarningSeconds ?? voiceNoteTimeWarningSeconds);
 
   // phase === 'ready' or 'peer-disconnected'
   return (
@@ -1360,7 +1854,41 @@ function ChatView({
       <InactivityCountdown remainingSeconds={remainingSeconds} />
       <div className={styles.chatHeader}>
         <div className={styles.headerLeft}>
-          <StatusBadge phase={isReady ? 'ready' : 'peer-disconnected'} connectionQuality={connectionQuality} />
+          <StatusBadge
+            phase={isReady ? 'ready' : 'peer-disconnected'}
+            connectionQuality={connectionQuality}
+          />
+          {participantCount > 1 && (
+            <button
+              type='button'
+              className={styles.participantBadge}
+              onClick={() => setShowParticipantList(true)}
+              title='View participants'
+            >
+              {participantCount}
+            </button>
+          )}
+          {peerPubKeys.size > 0 && (
+            <button
+              type='button'
+              className={styles.verifyButton}
+              onClick={() => setShowSafetyNumber(true)}
+              title='Verify security'
+            >
+              <svg
+                width='16'
+                height='16'
+                viewBox='0 0 24 24'
+                fill='none'
+                stroke='currentColor'
+                strokeWidth='2'
+                strokeLinecap='round'
+                strokeLinejoin='round'
+              >
+                <path d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z' />
+              </svg>
+            </button>
+          )}
         </div>
         <div className={styles.headerActions}>
           {showEndForMeOptions ? (
@@ -1405,10 +1933,7 @@ function ChatView({
               >
                 Yes
               </Button>
-              <Button
-                intent='neutral'
-                onClick={() => setShowEndConfirm(false)}
-              >
+              <Button intent='neutral' onClick={() => setShowEndConfirm(false)}>
                 Cancel
               </Button>
             </div>
@@ -1434,7 +1959,7 @@ function ChatView({
             <button
               type='button'
               className={`${styles.localGearButton} ${localSettingsOpen ? styles.gearButtonActive : ''}`}
-              onClick={() => setLocalSettingsOpen(prev => !prev)}
+              onClick={() => setLocalSettingsOpen((prev) => !prev)}
               title='Local settings'
             >
               <IconGear size={21} />
@@ -1445,14 +1970,18 @@ function ChatView({
                   <label className={styles.settingsLabel}>Auto-scroll</label>
                   <OnOffToggle
                     enabled={localSettings.autoScroll}
-                    onToggle={() => updateSetting('autoScroll', !localSettings.autoScroll)}
+                    onToggle={() =>
+                      updateSetting('autoScroll', !localSettings.autoScroll)
+                    }
                   />
                 </div>
                 <div className={styles.settingsRow}>
                   <label className={styles.settingsLabel}>Beep sound</label>
                   <OnOffToggle
                     enabled={localSettings.soundEnabled}
-                    onToggle={() => updateSetting('soundEnabled', !localSettings.soundEnabled)}
+                    onToggle={() =>
+                      updateSetting('soundEnabled', !localSettings.soundEnabled)
+                    }
                   />
                 </div>
               </div>
@@ -1502,66 +2031,106 @@ function ChatView({
         aria-label='Messages'
         onScroll={handleMessageListScroll}
       >
-          {messages.map((msg) => (
-            <MessageBubble
-              key={msg.id}
-              msgId={msg.id}
-              kind={msg.kind}
-              text={msg.text}
-              audioUrl={msg.audioUrl}
-              durationMs={msg.durationMs}
-              waveform={msg.waveform}
-              fileUrl={msg.fileUrl}
-              fileName={msg.fileName}
-              fileMimeType={msg.fileMimeType}
-              fileSize={msg.fileSize}
-              transferProgress={msg.transferProgress}
-              sender={msg.sender}
-              displayName={msg.displayName}
-              timestamp={msg.timestamp}
-              reactions={msg.reactions}
-              replyTo={msg.replyTo}
-              replyPreview={msg.replyPreview}
-              recentEmojis={recentEmojis}
-              timed={msg.timed}
-              timedConsumed={msg.timedConsumed}
-              onTimedExpire={msg.timed ? handleTimedExpire : undefined}
-              onPlayOnceComplete={msg.timed && msg.kind === 'audio' ? handlePlayOnceComplete : undefined}
-              autoPlay={autoPlayNextId === msg.id}
-              onAudioEnded={msg.kind === 'audio' && msg.audioUrl ? handleAudioEnded : undefined}
-              onReact={isReady && !msg.timed ? (emoji) => handleReact(msg.id, emoji) : undefined}
-              onReply={isReady && !msg.timed ? () => { setReplyingTo(msg); setInputFocusTrigger(c => c + 1); } : undefined}
-              onReplyClick={msg.replyTo ? () => scrollToMessage(msg.replyTo!) : undefined}
-              onCopy={msg.kind === 'text' && msg.text && !msg.timed ? () => handleCopyMessage(msg.text ?? '') : undefined}
-              onDownload={
-                (msg.kind === 'audio' && msg.audioUrl && !(msg.timed && msg.sender === 'peer'))
-                || ((msg.kind === 'image' || msg.kind === 'file') && msg.fileUrl && !(msg.timed && msg.sender === 'peer'))
+        {messages.map((msg) => (
+          <MessageBubble
+            key={msg.id}
+            msgId={msg.id}
+            kind={msg.kind}
+            text={msg.text}
+            audioUrl={msg.audioUrl}
+            durationMs={msg.durationMs}
+            waveform={msg.waveform}
+            fileUrl={msg.fileUrl}
+            fileName={msg.fileName}
+            fileMimeType={msg.fileMimeType}
+            fileSize={msg.fileSize}
+            transferProgress={msg.transferProgress}
+            sender={msg.sender}
+            displayName={msg.displayName}
+            timestamp={msg.timestamp}
+            reactions={msg.reactions}
+            replyTo={msg.replyTo}
+            replyPreview={msg.replyPreview}
+            recentEmojis={recentEmojis}
+            timed={msg.timed}
+            timedConsumed={msg.timedConsumed}
+            onTimedExpire={msg.timed ? handleTimedExpire : undefined}
+            onPlayOnceComplete={
+              msg.timed && msg.kind === 'audio'
+                ? handlePlayOnceComplete
+                : undefined
+            }
+            autoPlay={autoPlayNextId === msg.id}
+            onAudioEnded={
+              msg.kind === 'audio' && msg.audioUrl
+                ? handleAudioEnded
+                : undefined
+            }
+            onReact={
+              isReady && !msg.timed
+                ? (emoji) => handleReact(msg.id, emoji)
+                : undefined
+            }
+            onReply={
+              isReady && !msg.timed
                 ? () => {
-                  const url = msg.audioUrl ?? msg.fileUrl;
-                  if (!url) return;
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = msg.fileName ?? `file-${Date.now()}.webm`;
-                  a.click();
-                } : undefined
-              }
-              onImageClick={msg.kind === 'image' && msg.fileUrl && !msg.timed
-                ? () => setLightboxImage({ url: msg.fileUrl!, fileName: msg.fileName })
-                : undefined}
-              gallery={msg.gallery}
-              onGalleryImageClick={msg.kind === 'gallery' && msg.gallery && !msg.timed
-                ? (index: number) => handleGalleryImageClick(msg.gallery!, index)
-                : undefined}
-              pollId={msg.pollId}
-              pollQuestion={msg.pollQuestion}
-              pollEmoji={msg.pollEmoji}
-              pollOptions={msg.pollOptions}
-              pollAllowMultiple={msg.pollAllowMultiple}
-              pollMyVotes={msg.pollMyVotes}
-              notefadeUrl={msg.notefadeUrl}
-              onPollVote={isReady ? onPollVote : undefined}
-            />
-          ))}
+                    setReplyingTo(msg);
+                    setInputFocusTrigger((c) => c + 1);
+                  }
+                : undefined
+            }
+            onReplyClick={
+              msg.replyTo ? () => scrollToMessage(msg.replyTo!) : undefined
+            }
+            onCopy={
+              msg.kind === 'text' && msg.text && !msg.timed
+                ? () => handleCopyMessage(msg.text ?? '')
+                : undefined
+            }
+            onDownload={
+              (msg.kind === 'audio' &&
+                msg.audioUrl &&
+                !(msg.timed && msg.sender === 'peer')) ||
+              ((msg.kind === 'image' || msg.kind === 'file') &&
+                msg.fileUrl &&
+                !(msg.timed && msg.sender === 'peer'))
+                ? () => {
+                    const url = msg.audioUrl ?? msg.fileUrl;
+                    if (!url) return;
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = msg.fileName ?? `file-${Date.now()}.webm`;
+                    a.click();
+                  }
+                : undefined
+            }
+            onImageClick={
+              msg.kind === 'image' && msg.fileUrl && !msg.timed
+                ? () =>
+                    setLightboxImage({
+                      url: msg.fileUrl!,
+                      fileName: msg.fileName,
+                    })
+                : undefined
+            }
+            gallery={msg.gallery}
+            onGalleryImageClick={
+              msg.kind === 'gallery' && msg.gallery && !msg.timed
+                ? (index: number) =>
+                    handleGalleryImageClick(msg.gallery!, index)
+                : undefined
+            }
+            pollId={msg.pollId}
+            pollQuestion={msg.pollQuestion}
+            pollEmoji={msg.pollEmoji}
+            pollOptions={msg.pollOptions}
+            pollAllowMultiple={msg.pollAllowMultiple}
+            pollMyVotes={msg.pollMyVotes}
+            notefadeUrl={msg.notefadeUrl}
+            onPollVote={isReady ? onPollVote : undefined}
+            senderColor={msg.senderId ? senderColor(msg.senderId) : undefined}
+          />
+        ))}
         {peerTyping && (
           <div
             className={styles.typingIndicator}
@@ -1586,12 +2155,17 @@ function ChatView({
       {replyingTo && (
         <ReplyPreview
           text={
-            replyingTo.kind === 'audio' ? '(voice note)'
-            : replyingTo.kind === 'image' ? '(image)'
-            : replyingTo.kind === 'file' ? `(file: ${replyingTo.fileName ?? 'unknown'})`
-            : replyingTo.kind === 'poll' ? '(poll)'
-            : replyingTo.kind === 'gallery' ? '(photo gallery)'
-            : (replyingTo.text ?? '')
+            replyingTo.kind === 'audio'
+              ? '(voice note)'
+              : replyingTo.kind === 'image'
+                ? '(image)'
+                : replyingTo.kind === 'file'
+                  ? `(file: ${replyingTo.fileName ?? 'unknown'})`
+                  : replyingTo.kind === 'poll'
+                    ? '(poll)'
+                    : replyingTo.kind === 'gallery'
+                      ? '(photo gallery)'
+                      : (replyingTo.text ?? '')
           }
           displayName={replyingTo.displayName}
           onCancel={() => setReplyingTo(null)}
@@ -1638,7 +2212,10 @@ function ChatView({
       {photoComposerOpen && (
         <PhotoComposer
           onSend={handleSendGallery}
-          onClose={() => { setPhotoComposerOpen(false); setCameraFile(null) }}
+          onClose={() => {
+            setPhotoComposerOpen(false);
+            setCameraFile(null);
+          }}
           initialFiles={cameraFile ? [cameraFile] : undefined}
           recentEmojis={recentEmojis}
           onTrackEmoji={trackEmoji}
@@ -1655,8 +2232,10 @@ function ChatView({
           src={galleryLightbox.images[galleryLightbox.index]?.fileUrl ?? ''}
           fileName={galleryLightbox.images[galleryLightbox.index]?.fileName}
           galleryImages={galleryLightbox.images
-            .filter((img): img is GalleryImage & { fileUrl: string } => Boolean(img.fileUrl))
-            .map(img => ({ url: img.fileUrl, fileName: img.fileName }))}
+            .filter((img): img is GalleryImage & { fileUrl: string } =>
+              Boolean(img.fileUrl),
+            )
+            .map((img) => ({ url: img.fileUrl, fileName: img.fileName }))}
           initialIndex={galleryLightbox.index}
           onClose={() => setGalleryLightbox(null)}
         />
@@ -1674,12 +2253,26 @@ function ChatView({
           }}
         />
       )}
+      {showParticipantList && myClientId && (
+        <ParticipantList
+          participants={buildParticipantsList()}
+          onClose={() => setShowParticipantList(false)}
+        />
+      )}
+      {showSafetyNumber && myPubKeyRaw && peerPubKeys.size > 0 && (
+        <SafetyNumber
+          myPubKeyRaw={myPubKeyRaw}
+          peerPubKeys={[...peerPubKeys.values()]}
+          onClose={() => setShowSafetyNumber(false)}
+        />
+      )}
       {usernameModeEnabled && !localUsername && (
         <div className={styles.usernameModalBackdrop}>
           <form className={styles.usernameModal} onSubmit={submitUsername}>
             <h3 className={styles.usernameTitle}>Choose a username</h3>
             <p className={styles.usernameText}>
-              Username mode is enabled for this room. This name will appear next to your messages.
+              Username mode is enabled for this room. This name will appear next
+              to your messages.
             </p>
             <input
               type='text'
@@ -1690,10 +2283,18 @@ function ChatView({
               autoFocus
             />
             {peerUsername && (
-              <p className={styles.usernamePeerHint}>Partner username: {peerUsername}</p>
+              <p className={styles.usernamePeerHint}>
+                Partner username: {peerUsername}
+              </p>
             )}
-            {usernameError && <p className={styles.settingsError}>{usernameError}</p>}
-            <button className={styles.usernameSave} type='submit' disabled={usernameBusy}>
+            {usernameError && (
+              <p className={styles.settingsError}>{usernameError}</p>
+            )}
+            <button
+              className={styles.usernameSave}
+              type='submit'
+              disabled={usernameBusy}
+            >
               {usernameBusy ? 'Saving...' : 'Continue'}
             </button>
           </form>

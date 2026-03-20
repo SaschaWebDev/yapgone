@@ -7,6 +7,10 @@ bindings = [
   { name = "CHAT_ROOM", class_name = "ChatRoom" }
 ]
 
+[[kv_namespaces]]
+binding = "INVITE_SHARDS"
+id = "PLACEHOLDER_KV_ID"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ChatRoom"]
