@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
-import { generateKeyPair, exportPublicKey, toBase64Url } from '@/crypto'
-import { createRoom, buildInviteFragment } from '@/api'
+import { generateKeyPair, exportPublicKey, toBase64Url, xorSplit } from '@/crypto'
+import { createRoom, storeShard, buildSplitInviteFragment } from '@/api'
 import { STORAGE_KEYS } from '@/constants'
 import styles from './Home.module.css'
 
@@ -17,8 +17,16 @@ export function Home() {
       const kp = await generateKeyPair()
       const roomId = await createRoom()
       const pubKeyRaw = await exportPublicKey(kp.publicKey)
-      const pubKeyB64 = toBase64Url(pubKeyRaw)
-      const fragment = buildInviteFragment(roomId, pubKeyB64)
+
+      // XOR-split the pubkey: URL share + server shard
+      const { share1: urlShare, share2: serverShard } = xorSplit(pubKeyRaw)
+      const urlShareB64 = toBase64Url(urlShare)
+      const serverShardB64 = toBase64Url(serverShard)
+
+      // Store server shard (auto-expires via KV TTL)
+      await storeShard(roomId, serverShardB64)
+
+      const fragment = buildSplitInviteFragment(roomId, urlShareB64)
 
       sessionStorage.setItem(`${STORAGE_KEYS.CREATOR_PREFIX}${roomId}`, '1')
       window.location.hash = fragment
