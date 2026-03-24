@@ -8,3 +8,4 @@ export { computePairwiseSafetyNumber, computeGroupFingerprint, formatSafetyNumbe
 export { generateSenderKey, exportSenderKeyForDistribution, importReceivedSenderKey, senderKeyEncrypt, senderKeyDecrypt, destroySenderKeyState, destroyReceivedSenderKey } from './sender-keys'
 export type { SenderKeyState, ReceivedSenderKey, ExportedSenderKey } from './sender-keys'
 export { WORDLIST, generateSafeWord } from './wordlist'
+export { encryptForNotefade, decryptFromNotefade } from './notefade-crypto'

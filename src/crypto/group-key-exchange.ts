@@ -53,7 +53,7 @@ export async function establishPairwiseRatchet(
   state: GroupMemberCrypto,
   peerId: string,
   peerPubKeyRaw: Uint8Array,
-): Promise<{ state: GroupMemberCrypto; ratchet: RatchetState }> {
+): Promise<{ state: GroupMemberCrypto; ratchet: RatchetState; rootKey: Uint8Array }> {
   const peerPubKey = await importPublicKey(peerPubKeyRaw)
   const sharedSecret = await deriveSharedSecret(state.myKeyPair.privateKey, peerPubKey)
   const rootKey = await hkdfDerive(sharedSecret, SALT, INFO, 32)
@@ -77,6 +77,7 @@ export async function establishPairwiseRatchet(
   return {
     state: { ...state, pairwiseRatchets: newPairwise, peerPubKeys: newPeerPubKeys },
     ratchet,
+    rootKey,
   }
 }
 
