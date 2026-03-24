@@ -3,6 +3,7 @@ import { toBase64Url } from '@/crypto'
 export interface MessageReaction {
   emoji: string
   fromSelf: boolean
+  senderId?: string
 }
 
 export interface PollOption {
@@ -22,7 +23,7 @@ export interface GalleryImage {
 
 export interface ChatMessage {
   id: string
-  kind: 'text' | 'audio' | 'image' | 'file' | 'poll' | 'gallery' | 'notefade'
+  kind: 'text' | 'audio' | 'image' | 'file' | 'poll' | 'gallery' | 'notefade' | 'notefade-chat'
   text?: string
   audioUrl?: string
   durationMs?: number
@@ -49,6 +50,9 @@ export interface ChatMessage {
   pollMyVotes?: number[]
   gallery?: GalleryImage[]
   notefadeUrl?: string
+  notefadeRevealedText?: string
+  notefadeRevealed?: boolean
+  notefadeDestroyed?: boolean
 }
 
 export function generateMessageId(): string {
@@ -143,6 +147,24 @@ export function buildNotefadeMessage(
   }
 }
 
+export function buildNotefadeChatMessage(
+  sender: 'self' | 'peer',
+  url: string,
+  displayName?: string,
+  id?: string,
+  timestamp?: number,
+): ChatMessage {
+  return {
+    id: id ?? generateMessageId(),
+    kind: 'notefade-chat',
+    notefadeUrl: url,
+    sender,
+    displayName,
+    timestamp: timestamp ?? Date.now(),
+    reactions: [],
+  }
+}
+
 export function buildPollMessage(
   sender: 'self' | 'peer',
   pollId: string,
@@ -175,15 +197,24 @@ export function applyReaction(
   emoji: string,
   action: 'add' | 'remove',
   fromSelf: boolean,
+  senderId?: string,
 ): ChatMessage[] {
   return messages.map(msg => {
     if (msg.id !== msgId) return msg
     let reactions = [...msg.reactions]
     if (action === 'add') {
-      reactions = reactions.filter(r => r.fromSelf !== fromSelf)
-      reactions = [...reactions, { emoji, fromSelf }]
+      if (senderId) {
+        reactions = reactions.filter(r => r.senderId !== senderId)
+      } else {
+        reactions = reactions.filter(r => r.fromSelf !== fromSelf)
+      }
+      reactions = [...reactions, { emoji, fromSelf, senderId }]
     } else {
-      reactions = reactions.filter(r => !(r.emoji === emoji && r.fromSelf === fromSelf))
+      if (senderId) {
+        reactions = reactions.filter(r => !(r.emoji === emoji && r.senderId === senderId))
+      } else {
+        reactions = reactions.filter(r => !(r.emoji === emoji && r.fromSelf === fromSelf))
+      }
     }
     return { ...msg, reactions }
   })
@@ -198,6 +229,7 @@ export function findReplyPreview(messages: ChatMessage[], replyTo: string): stri
   if (target.kind === 'poll') return '(poll)'
   if (target.kind === 'gallery') return '(photo gallery)'
   if (target.kind === 'notefade') return '(self-destructing note)'
+  if (target.kind === 'notefade-chat') return '(secret note)'
   if (target.timed) return '(timed message)'
   const text = target.text ?? ''
   return text.length > 80 ? text.slice(0, 80) + '...' : text

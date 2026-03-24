@@ -7,7 +7,7 @@ interface QrCodeProps {
   size?: number
 }
 
-export function QrCode({ url, size = 160 }: QrCodeProps) {
+export function QrCode({ url, size = 200 }: QrCodeProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   useEffect(() => {
@@ -20,13 +20,18 @@ export function QrCode({ url, size = 160 }: QrCodeProps) {
         dark: isDark ? '#e8e8e8' : '#1a1a1a',
         light: isDark ? '#1a1a1a' : '#ffffff',
       },
+    }).then(() => {
+      const canvas = canvasRef.current
+      if (!canvas) return
+      canvas.style.width = '100%'
+      canvas.style.height = 'auto'
     })
   }, [url, size])
 
   return (
     <div className={styles.container}>
       <canvas ref={canvasRef} className={styles.canvas} />
-      <p className={styles.hint}>or scan to join</p>
+      <p className={styles.hint}>scan to join</p>
     </div>
   )
 }

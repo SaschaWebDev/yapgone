@@ -47,10 +47,20 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 0.6rem 0.85rem;
-  max-width: 640px;
+  width: 640px;
+  max-width: 100%;
   min-width: 0;
-  flex: 1;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.inviteButtonRow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  cursor: pointer;
 }
 
 .inviteBoxTop {
@@ -59,6 +69,22 @@
   align-items: center;
   gap: 12px;
   cursor: pointer;
+}
+
+.orSeparator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 0 0.5rem;
+  font-size: 0.72rem;
+  color: var(--text-tertiary);
+  letter-spacing: 0.05em;
+}
+
+.qrSection {
+  flex: 0 0 35%;
+  min-width: 0;
 }
 
 .inviteBox:hover {
@@ -77,9 +103,6 @@
 }
 
 .copiedHint {
-  position: absolute;
-  top: -24px;
-  right: 0;
   font-size: 12px;
   font-weight: 500;
   color: var(--success);
@@ -95,23 +118,22 @@
 }
 
 @keyframes hint-in {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .urlText {
   flex: 1;
   min-width: 0;
-  font-size: 0.75rem;
+  font-size: 0.65rem;
   color: var(--text-secondary);
   word-break: break-all;
-}
-
-.inviteActions {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  flex-shrink: 0;
 }
 
 .copyIcon {
@@ -129,8 +151,7 @@
   transition: all 0.15s ease;
 }
 
-.copyIcon:hover,
-.inviteBoxTop:hover .copyIcon {
+.copyIcon:hover {
   background: rgba(var(--fg), 0.1);
   color: rgba(var(--fg), 0.6);
 }
@@ -190,7 +211,6 @@
   gap: 0.4rem;
 }
 
-
 .confirmBar {
   display: flex;
   align-items: center;
@@ -201,7 +221,6 @@
   color: var(--text-secondary);
   font-size: 0.8rem;
 }
-
 
 .messageList {
   display: flex;
@@ -266,7 +285,10 @@
   border-radius: var(--radius-sm);
   color: rgba(var(--fg), 0.3);
   cursor: pointer;
-  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .gearButton:hover {
@@ -291,8 +313,14 @@
 }
 
 @keyframes settingsFadeIn {
-  from { opacity: 0; transform: translateY(-4px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .settingsRow {
@@ -319,11 +347,6 @@
 .settingsHint {
   font-size: 0.78rem;
   color: var(--text-secondary);
-}
-
-.settingsHintSuccess {
-  font-size: 0.78rem;
-  color: var(--success);
 }
 
 .activeSettings {
@@ -445,7 +468,6 @@
   cursor: pointer;
 }
 
-
 .messageList {
   position: relative;
 }
@@ -472,12 +494,20 @@
 }
 
 @keyframes pillIn {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes typingPulse {
-  0%, 60%, 100% {
+  0%,
+  60%,
+  100% {
     opacity: 0.4;
     transform: scale(0.8);
   }
@@ -488,47 +518,90 @@
 }
 
 .participantBadge {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 1.5rem;
-  height: 1.5rem;
-  padding: 0 0.35rem;
-  border-radius: 999px;
-  background: rgba(var(--fg), 0.06);
+  width: 41px;
+  height: 41px;
+  background: rgba(var(--fg), 0.04);
   border: 1px solid rgba(var(--fg), 0.08);
-  color: var(--text-secondary);
-  font-size: 0.72rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
+  border-radius: var(--radius-sm);
+  color: rgba(var(--fg), 0.3);
   cursor: pointer;
-  transition: all 0.15s ease;
+  overflow: hidden;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .participantBadge:hover {
-  background: rgba(var(--fg), 0.1);
-  color: var(--text-primary);
-  border-color: rgba(var(--fg), 0.15);
+  color: rgba(var(--fg), 0.55);
+  background: rgba(var(--fg), 0.07);
+  border-color: rgba(var(--fg), 0.12);
 }
 
-.verifyButton {
+.participantBadge .participantIcon {
+  transform: scale(1.1);
+}
+
+.securityBox {
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 1.5rem;
-  height: 1.5rem;
+  gap: 0.5rem;
+  height: 41px;
+  padding: 0 0.5rem;
   border-radius: var(--radius-sm);
   background: rgba(var(--fg), 0.04);
   border: 1px solid rgba(var(--fg), 0.08);
-  color: rgba(var(--fg), 0.3);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
 
-.verifyButton:hover {
-  color: var(--accent);
-  background: rgba(var(--accent-rgb), 0.06);
+.securityBox:hover {
   border-color: rgba(var(--accent-rgb), 0.2);
+  background: rgba(var(--accent-rgb), 0.06);
+}
+
+.shieldComposite {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(var(--fg), 0.3);
+  transform: scale(1.5);
+  transition: color 0.15s ease;
+}
+
+.securityBox:hover .shieldComposite {
+  color: var(--accent);
+}
+
+.shieldDot {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.shieldActive svg {
+  fill: rgba(var(--success-rgb), 0.45);
+  filter: drop-shadow(0 0 3px rgba(var(--success-rgb), 0.2));
+  transition: fill 0.15s ease, filter 0.15s ease;
+}
+
+.securityBox:hover .shieldActive svg {
+  fill: var(--success);
+  filter: drop-shadow(0 0 4px rgba(var(--success-rgb), 0.4));
+}
+
+.shieldDotWarning {
+  background: var(--warning);
 }
 
 /* Header actions wrapper */
@@ -554,7 +627,10 @@
   border-radius: var(--radius-sm);
   color: rgba(var(--fg), 0.3);
   cursor: pointer;
-  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .localGearButton:hover {
@@ -581,8 +657,14 @@
 }
 
 @keyframes dropdownIn {
-  from { opacity: 0; transform: translateY(-4px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* Reconnecting indicator */
@@ -595,8 +677,13 @@
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 0.5; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 /* Waiting phase layout */
@@ -652,13 +739,23 @@
 }
 
 @keyframes breathe {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 @keyframes dotFade {
-  0%, 100% { opacity: 0.2; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 .sliderRow {
@@ -679,6 +776,29 @@
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.participantIcon {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  color: var(--accent);
+}
+
+.participantCount {
+  position: absolute;
+  bottom: 5px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.65rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  color: #fff;
 }
 
 .participantSlider {
@@ -713,6 +833,17 @@
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
 }
 
+.settingsRowAnimated {
+  width: 100%;
+  animation: settingsFadeIn 0.2s ease-out;
+}
+
+.gearButtonDisabled {
+  opacity: 0.3;
+  pointer-events: none;
+  cursor: default;
+}
+
 .safeWordInputWrapper {
   display: flex;
   align-items: center;
@@ -726,6 +857,25 @@
 
 .safeWordInputWrapper:focus-within {
   border-color: rgba(var(--accent-rgb), 0.4);
+}
+
+.safeWordInputWrapperApplied {
+  animation: settingsFadeIn 0.2s ease-out, safeWordPulse 0.6s ease-out;
+}
+
+@keyframes safeWordPulse {
+  0% {
+    border-color: rgba(var(--success-rgb), 0.6);
+    box-shadow: 0 0 0 0 rgba(var(--success-rgb), 0.3);
+  }
+  50% {
+    border-color: rgba(var(--success-rgb), 0.5);
+    box-shadow: 0 0 0 4px rgba(var(--success-rgb), 0.08);
+  }
+  100% {
+    border-color: rgba(var(--fg), 0.08);
+    box-shadow: 0 0 0 0 rgba(var(--success-rgb), 0);
+  }
 }
 
 .safeWordInlineInput {
@@ -758,7 +908,9 @@
 }
 
 .copySafeWordButton svg {
-  transition: transform 0.2s ease, opacity 0.2s ease;
+  transition:
+    transform 0.2s ease,
+    opacity 0.2s ease;
 }
 
 .copySafeWordButtonCopied svg {
@@ -766,9 +918,17 @@
 }
 
 @keyframes swCheckPop {
-  0% { transform: scale(0.5); opacity: 0; }
-  60% { transform: scale(1.15); }
-  100% { transform: scale(1); opacity: 1; }
+  0% {
+    transform: scale(0.5);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.15);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 .copySafeWordButton:hover {
@@ -813,4 +973,43 @@
   color: rgba(var(--fg), 0.5);
 }
 
+.voiceCallBadge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 41px;
+  height: 41px;
+  background: rgba(var(--fg), 0.04);
+  border: 1px solid rgba(var(--fg), 0.08);
+  border-radius: var(--radius-sm);
+  color: var(--success);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
 
+.voiceCallBadge:hover {
+  background: rgba(var(--success-rgb, 34, 197, 94), 0.08);
+  border-color: rgba(var(--success-rgb, 34, 197, 94), 0.25);
+}
+
+.voicePrivacyBanner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.6rem;
+  background: rgba(var(--fg), 0.03);
+  border-bottom: 1px solid var(--border);
+  animation: fadeIn 0.2s ease-out;
+}
+
+.voicePrivacyText {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.voicePrivacyActions {
+  display: flex;
+  gap: 0.4rem;
+  justify-content: flex-end;
+}

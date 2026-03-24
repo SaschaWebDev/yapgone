@@ -6,8 +6,8 @@ import {
   type FormEvent,
 } from 'react';
 import { computeWaveform } from '@/utils';
-import { createNotefadeNote } from '@/api';
-import { generateSafeWord } from '@/crypto';
+import { createNotefadeNote, readNotefadeNote } from '@/api';
+import { generateSafeWord, encryptForNotefade, decryptFromNotefade } from '@/crypto';
 import chatBubbleStyles from '@/components/ui/message-bubble/MessageBubble.module.css';
 import {
   useGroupChat,
@@ -19,7 +19,11 @@ import {
   senderColor,
 } from '@/hooks';
 import type { VoiceSignal } from '@/types';
-import type { ChatMessage, GalleryImage } from '@/hooks/chat-helpers';
+import type {
+  ChatMessage,
+  GalleryImage,
+  MessageReaction,
+} from '@/hooks/chat-helpers';
 import type { ConnectionQuality } from '@/components/ui/status-badge/StatusBadge';
 import type { RoomSettings } from '@/room-settings';
 import {
@@ -38,6 +42,8 @@ import {
   IconCopy,
   IconCheck,
   IconGear,
+  IconPerson,
+  IconPhone,
   OnOffToggle,
   QrCode,
   ReplyPreview,
@@ -218,6 +224,9 @@ function CreatorChat({
     inviteUrl,
     sendMessage,
     sendNotefade,
+    sendNotefadeChat,
+    sendNotefadeChatRevealed,
+    sendNotefadeChatDestroyed,
     sendReaction,
     removeTimedMessage,
     sendTimedConsumed,
@@ -276,6 +285,10 @@ function CreatorChat({
       onPollVote={sendPollVote}
       onSendGallery={sendGallery}
       onSendNotefade={sendNotefade}
+      onSendNotefadeChat={sendNotefadeChat}
+      onSendNotefadeChatRevealed={sendNotefadeChatRevealed}
+      onSendNotefadeChatDestroyed={sendNotefadeChatDestroyed}
+      roomId={roomId}
       onEnd={endChat}
       onEndForAll={endChatForAll}
       roomSettings={roomSettings}
@@ -310,6 +323,9 @@ function JoinerChat({
     peerTyping,
     sendMessage,
     sendNotefade,
+    sendNotefadeChat,
+    sendNotefadeChatRevealed,
+    sendNotefadeChatDestroyed,
     sendReaction,
     removeTimedMessage,
     sendTimedConsumed,
@@ -367,6 +383,10 @@ function JoinerChat({
       onPollVote={sendPollVote}
       onSendGallery={sendGallery}
       onSendNotefade={sendNotefade}
+      onSendNotefadeChat={sendNotefadeChat}
+      onSendNotefadeChatRevealed={sendNotefadeChatRevealed}
+      onSendNotefadeChatDestroyed={sendNotefadeChatDestroyed}
+      roomId={roomId}
       onEnd={endChat}
       onEndForAll={endChatForAll}
       roomSettings={roomSettings}
@@ -460,6 +480,10 @@ interface ChatViewProps {
     timed?: boolean,
   ) => Promise<void>;
   onSendNotefade: (url: string) => Promise<void>;
+  onSendNotefadeChat: (url: string) => Promise<void>;
+  onSendNotefadeChatRevealed: (noteId: string) => Promise<void>;
+  onSendNotefadeChatDestroyed: (noteId: string) => Promise<void>;
+  roomId: string;
   onEnd: () => void;
   onEndForAll: () => void;
   roomSettings: RoomSettings;
@@ -493,6 +517,10 @@ function ChatView({
   onPollVote,
   onSendGallery,
   onSendNotefade,
+  onSendNotefadeChat,
+  onSendNotefadeChatRevealed,
+  onSendNotefadeChatDestroyed,
+  roomId,
   onEnd,
   onEndForAll,
   roomSettings,
@@ -509,7 +537,6 @@ function ChatView({
   peerPubKeys,
 }: ChatViewProps) {
   const [showEndConfirm, setShowEndConfirm] = useState(false);
-  const [showEndForMeOptions, setShowEndForMeOptions] = useState(false);
   const [copyState, setCopyState] = useState<'idle' | 'shown' | 'fading'>(
     'idle',
   );
@@ -563,6 +590,7 @@ function ChatView({
   } | null>(null);
   const [showParticipantList, setShowParticipantList] = useState(false);
   const [showSafetyNumber, setShowSafetyNumber] = useState(false);
+  const [showVoicePrivacyNotice, setShowVoicePrivacyNotice] = useState(false);
   const [pendingMaxParticipants, setPendingMaxParticipants] = useState(
     roomSettings.maxParticipants,
   );
@@ -594,14 +622,35 @@ function ChatView({
   const { settings: localSettings, updateSetting } = useLocalChatSettings();
   const { recentEmojis, trackEmoji } = useRecentEmojis();
 
-  const timerPaused = phase === 'creating' || phase === 'waiting'
-    || phase === 'connecting' || phase === 'key-exchange';
+  const timerPaused =
+    phase === 'creating' ||
+    phase === 'waiting' ||
+    phase === 'connecting' ||
+    phase === 'key-exchange';
   const { remainingSeconds, resetTimer } = useInactivityTimer(
     ROOM_INACTIVITY_TTL_MS,
     timerPaused,
   );
 
   useNotifications(messages, phase, localSettings.soundEnabled);
+
+  const handleHeaderCallClick = () => {
+    if (!voice.privacyAcknowledged) {
+      setShowVoicePrivacyNotice(true);
+      return;
+    }
+    voice.startCall();
+  };
+
+  const handleVoicePrivacyAccept = () => {
+    setShowVoicePrivacyNotice(false);
+    voice.acknowledgePrivacy();
+    voice.startCall();
+  };
+
+  const handleVoicePrivacyCancel = () => {
+    setShowVoicePrivacyNotice(false);
+  };
 
   const buildParticipantsList = useCallback(() => {
     const list: Array<{
@@ -612,11 +661,22 @@ function ChatView({
     if (myClientId) {
       list.push({ clientId: myClientId, username: localUsername, isYou: true });
     }
-    for (const [id, name] of peerUsernames) {
-      list.push({ clientId: id, username: name, isYou: false });
+    for (const [id] of peerPubKeys) {
+      list.push({ clientId: id, username: peerUsernames.get(id) ?? null, isYou: false });
     }
     return list;
-  }, [myClientId, localUsername, peerUsernames]);
+  }, [myClientId, localUsername, peerUsernames, peerPubKeys]);
+
+  const resolveReactorName = useCallback(
+    (reaction: MessageReaction): string => {
+      if (reaction.fromSelf) return 'You';
+      if (reaction.senderId) {
+        return peerUsernames.get(reaction.senderId) ?? 'Anonymous';
+      }
+      return peerUsername ?? 'Anonymous';
+    },
+    [peerUsernames, peerUsername],
+  );
 
   // Reset inactivity timer on any new message (sent or received)
   useEffect(() => {
@@ -627,6 +687,13 @@ function ChatView({
   useEffect(() => {
     if (peerTyping) resetTimer();
   }, [peerTyping, resetTimer]);
+
+  // Auto-dismiss voice privacy notice if call state changes
+  useEffect(() => {
+    if (voice.callState !== 'idle') {
+      setShowVoicePrivacyNotice(false);
+    }
+  }, [voice.callState]);
 
   // Wrap onTyping to also reset inactivity timer
   const handleTyping = useCallback(
@@ -702,17 +769,59 @@ function ChatView({
   }, []);
 
   const handleNotefadeSend = useCallback(
-    async (noteText: string) => {
+    async (noteText: string, mode: 'url' | 'chat') => {
       try {
-        const url = await createNotefadeNote(noteText);
-        await onSendNotefade(url);
+        if (mode === 'url') {
+          const url = await createNotefadeNote(noteText);
+          await onSendNotefade(url);
+        } else {
+          const encrypted = await encryptForNotefade(noteText, roomId);
+          const url = await createNotefadeNote(encrypted);
+          await onSendNotefadeChat(url);
+        }
       } catch {
         // silently fail — the note creation failed upstream
       } finally {
         setNotefadeComposerOpen(false);
       }
     },
-    [onSendNotefade],
+    [onSendNotefade, onSendNotefadeChat, roomId],
+  );
+
+  const [revealedNotes, setRevealedNotes] = useState<Map<string, string>>(
+    () => new Map(),
+  );
+
+  const handleRevealNotefade = useCallback(
+    async (messageId: string, url: string) => {
+      try {
+        const encryptedText = await readNotefadeNote(url);
+        const plaintext = await decryptFromNotefade(encryptedText, roomId);
+        setRevealedNotes(prev => new Map(prev).set(messageId, plaintext));
+        await onSendNotefadeChatRevealed(messageId);
+      } catch (err) {
+        const errorText =
+          err instanceof Error && err.message.includes('not found')
+            ? 'Note expired or already read'
+            : 'Failed to reveal note';
+        setRevealedNotes(prev =>
+          new Map(prev).set(messageId, `[${errorText}]`),
+        );
+      }
+    },
+    [roomId, onSendNotefadeChatRevealed],
+  );
+
+  const handleDestroyNotefade = useCallback(
+    async (messageId: string, url: string) => {
+      try {
+        await readNotefadeNote(url);
+      } catch {
+        // note may already be consumed — still mark destroyed
+      }
+      await onSendNotefadeChatDestroyed(messageId);
+    },
+    [onSendNotefadeChatDestroyed],
   );
 
   const handleSendFile = useCallback(
@@ -886,13 +995,11 @@ function ChatView({
         setReplyingTo(null);
       } else if (showEndConfirm) {
         setShowEndConfirm(false);
-      } else if (showEndForMeOptions) {
-        setShowEndForMeOptions(false);
       }
     };
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
-  }, [localSettingsOpen, replyingTo, showEndConfirm, showEndForMeOptions]);
+  }, [localSettingsOpen, replyingTo, showEndConfirm]);
 
   useEffect(() => {
     if (localUsername) {
@@ -1255,6 +1362,9 @@ function ChatView({
 
   const usernameForced = pendingMaxParticipants > 2;
 
+  const allSettingsVisible =
+    (usernameForced || pendingUsernameMode) && pendingSafeWordEnabled;
+
   const toggleUsernameMode = useCallback(() => {
     const next = !pendingUsernameMode;
     setPendingUsernameMode(next);
@@ -1383,27 +1493,21 @@ function ChatView({
                     className={`${styles.inviteBox} ${copied ? styles.inviteBoxCopied : ''}`}
                   >
                     <div
-                      className={styles.inviteBoxTop}
+                      className={styles.inviteButtonRow}
                       onClick={handleCopy}
-                      role='button'
-                      tabIndex={0}
                     >
-                      <code className={styles.urlText}>{inviteUrl}</code>
-                      <div className={styles.inviteActions}>
-                        <button
-                          type='button'
-                          className={styles.copyIcon}
-                          onClick={handleCopy}
-                          title={copied ? 'copied' : 'copy to clipboard'}
-                        >
-                          {copied ? (
-                            <IconCheck size={16} />
-                          ) : (
-                            <IconCopy size={16} />
-                          )}
-                        </button>
-                      </div>
-                      <QrCode url={inviteUrl} size={48} />
+                      <button
+                        type='button'
+                        className={styles.copyIcon}
+                        onClick={handleCopy}
+                        title={copied ? 'copied' : 'copy to clipboard'}
+                      >
+                        {copied ? (
+                          <IconCheck size={16} />
+                        ) : (
+                          <IconCopy size={16} />
+                        )}
+                      </button>
                       {copied && (
                         <span
                           className={`${styles.copiedHint} ${copyState === 'fading' ? styles.copiedHintFading : ''}`}
@@ -1412,15 +1516,27 @@ function ChatView({
                         </span>
                       )}
                     </div>
+                    <div
+                      className={styles.inviteBoxTop}
+                      onClick={handleCopy}
+                      role='button'
+                      tabIndex={0}
+                    >
+                      <code className={styles.urlText}>{inviteUrl}</code>
+                      <span className={styles.orSeparator}>or</span>
+                      <div className={styles.qrSection}>
+                        <QrCode url={inviteUrl} />
+                      </div>
+                    </div>
                     {onUpdateRoomSettings && (
                       <div className={styles.inviteBoxSettings}>
                         <div className={styles.sliderRow}>
-                          <span className={styles.sliderLabel}>
-                            Participants{' '}
-                            <span className={styles.sliderValue}>
+                          <div className={styles.participantIcon}>
+                            <IconPerson size={40} />
+                            <span className={styles.participantCount}>
                               {pendingMaxParticipants}
                             </span>
-                          </span>
+                          </div>
                           <input
                             type='range'
                             min={2}
@@ -1435,22 +1551,31 @@ function ChatView({
                           />
                           <button
                             type='button'
-                            className={`${styles.gearButton} ${settingsOpen ? styles.gearButtonActive : ''}`}
+                            className={`${styles.gearButton} ${
+                              allSettingsVisible
+                                ? styles.gearButtonDisabled
+                                : settingsOpen
+                                  ? styles.gearButtonActive
+                                  : ''
+                            }`}
                             onClick={() => {
+                              if (allSettingsVisible) return;
                               setSettingsOpen((prev) => {
                                 if (prev) flushPendingSafeWord();
                                 return !prev;
                               });
                             }}
+                            disabled={allSettingsVisible}
                             title='Chat room settings'
                           >
                             <IconGear size={18} />
                           </button>
                         </div>
-                        {(usernameForced || pendingUsernameMode || settingsOpen) && (
+                        {(usernameForced ||
+                          pendingUsernameMode ||
+                          settingsOpen) && (
                           <div
-                            className={styles.settingsRow}
-                            style={{ width: '100%', animation: 'settingsFadeIn 0.2s ease-out' }}
+                            className={`${styles.settingsRow} ${styles.settingsRowAnimated}`}
                           >
                             <label className={styles.settingsLabel}>
                               Username mode
@@ -1464,8 +1589,7 @@ function ChatView({
                         )}
                         {(pendingSafeWordEnabled || settingsOpen) && (
                           <div
-                            className={styles.settingsRow}
-                            style={{ width: '100%', animation: 'settingsFadeIn 0.2s ease-out' }}
+                            className={`${styles.settingsRow} ${styles.settingsRowAnimated}`}
                           >
                             <label className={styles.settingsLabel}>
                               Safe word agreement
@@ -1478,7 +1602,9 @@ function ChatView({
                         )}
                         {pendingSafeWordEnabled && (
                           <>
-                            <span className={styles.safeWordInputWrapper}>
+                            <span
+                              className={`${styles.safeWordInputWrapper} ${safeWordApplied && !applyingSafeWord ? styles.safeWordInputWrapperApplied : ''}`}
+                            >
                               <input
                                 type={showSafeWord ? 'text' : 'password'}
                                 className={styles.safeWordInlineInput}
@@ -1499,7 +1625,9 @@ function ChatView({
                                 className={`${styles.copySafeWordButton} ${swCopied ? styles.copySafeWordButtonCopied : ''}`}
                                 onClick={() => {
                                   if (swCopied) return;
-                                  void navigator.clipboard.writeText(pendingSafeWord);
+                                  void navigator.clipboard.writeText(
+                                    pendingSafeWord,
+                                  );
                                   setSwCopied(true);
                                   setTimeout(() => setSwCopied(false), 2000);
                                 }}
@@ -1644,14 +1772,7 @@ function ChatView({
                               </button>
                             </span>
                             {applyingSafeWord && (
-                              <p className={styles.settingsHint}>
-                                Applying...
-                              </p>
-                            )}
-                            {safeWordApplied && !applyingSafeWord && (
-                              <p className={styles.settingsHintSuccess}>
-                                Safe word set
-                              </p>
+                              <p className={styles.settingsHint}>Applying...</p>
                             )}
                             {settingsError && (
                               <p className={styles.settingsError}>
@@ -1764,12 +1885,18 @@ function ChatView({
                   : undefined
               }
               notefadeUrl={msg.notefadeUrl}
+              notefadeRevealedText={revealedNotes.get(msg.id)}
+              notefadeRevealed={msg.notefadeRevealed}
+              notefadeDestroyed={msg.notefadeDestroyed}
+              onRevealNotefade={handleRevealNotefade}
+              onDestroyNotefade={handleDestroyNotefade}
               pollId={msg.pollId}
               pollQuestion={msg.pollQuestion}
               pollEmoji={msg.pollEmoji}
               pollOptions={msg.pollOptions}
               pollAllowMultiple={msg.pollAllowMultiple}
               pollMyVotes={msg.pollMyVotes}
+              resolveReactorName={resolveReactorName}
             />
           ))}
           <div ref={messagesEndRef} />
@@ -1854,30 +1981,20 @@ function ChatView({
       <InactivityCountdown remainingSeconds={remainingSeconds} />
       <div className={styles.chatHeader}>
         <div className={styles.headerLeft}>
-          <StatusBadge
-            phase={isReady ? 'ready' : 'peer-disconnected'}
-            connectionQuality={connectionQuality}
-          />
-          {participantCount > 1 && (
-            <button
-              type='button'
-              className={styles.participantBadge}
-              onClick={() => setShowParticipantList(true)}
-              title='View participants'
-            >
-              {participantCount}
-            </button>
-          )}
-          {peerPubKeys.size > 0 && (
-            <button
-              type='button'
-              className={styles.verifyButton}
-              onClick={() => setShowSafetyNumber(true)}
-              title='Verify security'
-            >
+          <div
+            className={styles.securityBox}
+            onClick={
+              peerPubKeys.size > 0 ? () => setShowSafetyNumber(true) : undefined
+            }
+            role={peerPubKeys.size > 0 ? 'button' : undefined}
+            tabIndex={peerPubKeys.size > 0 ? 0 : undefined}
+            title={peerPubKeys.size > 0 ? 'Verify security' : undefined}
+            style={peerPubKeys.size === 0 ? { cursor: 'default' } : undefined}
+          >
+            <span className={`${styles.shieldComposite} ${isReady ? styles.shieldActive : ''}`}>
               <svg
-                width='16'
-                height='16'
+                width='18'
+                height='18'
                 viewBox='0 0 24 24'
                 fill='none'
                 stroke='currentColor'
@@ -1887,43 +2004,60 @@ function ChatView({
               >
                 <path d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z' />
               </svg>
+              {!isReady && (
+                <span
+                  className={`${styles.shieldDot} ${styles.shieldDotWarning}`}
+                />
+              )}
+            </span>
+            <StatusBadge
+              phase={isReady ? 'ready' : 'peer-disconnected'}
+              connectionQuality={connectionQuality}
+              hideDot
+            />
+          </div>
+          {participantCount > 1 && (
+            <button
+              type='button'
+              className={styles.participantBadge}
+              onClick={() => setShowParticipantList(true)}
+              title='View participants'
+            >
+              <div className={styles.participantIcon}>
+                <IconPerson size={40} />
+                <span className={styles.participantCount}>{participantCount}</span>
+              </div>
+            </button>
+          )}
+          {isReady && voice.callState === 'idle' && (
+            <button
+              type='button'
+              className={styles.voiceCallBadge}
+              onClick={handleHeaderCallClick}
+              title='Start voice call'
+              aria-label='Start voice call'
+            >
+              <IconPhone size={20} />
             </button>
           )}
         </div>
         <div className={styles.headerActions}>
-          {showEndForMeOptions ? (
+          {showEndConfirm ? (
             <div className={styles.confirmBar}>
               <span className={styles.confirmText}>
-                How would you like to leave?
+                {participantCount > 2 ? 'Leave this chat?' : 'Leave chat?'}
               </span>
-              <Button
-                intent='destructive'
-                onClick={() => {
-                  setShowEndForMeOptions(false);
-                  onEnd();
-                }}
-              >
-                Silent exit
-              </Button>
-              <Button
-                intent='destructive'
-                onClick={() => {
-                  setShowEndForMeOptions(false);
-                  onEndForAll();
-                }}
-              >
-                Notify partner
-              </Button>
-              <Button
-                intent='neutral'
-                onClick={() => setShowEndForMeOptions(false)}
-              >
-                Cancel
-              </Button>
-            </div>
-          ) : showEndConfirm ? (
-            <div className={styles.confirmBar}>
-              <span className={styles.confirmText}>End for both?</span>
+              {participantCount > 2 && (
+                <Button
+                  intent='destructive'
+                  onClick={() => {
+                    setShowEndConfirm(false);
+                    onEnd();
+                  }}
+                >
+                  Leave
+                </Button>
+              )}
               <Button
                 intent='destructive'
                 onClick={() => {
@@ -1931,7 +2065,7 @@ function ChatView({
                   onEndForAll();
                 }}
               >
-                Yes
+                {participantCount > 2 ? 'Close room' : 'Leave'}
               </Button>
               <Button intent='neutral' onClick={() => setShowEndConfirm(false)}>
                 Cancel
@@ -1941,17 +2075,10 @@ function ChatView({
             <div className={styles.endButtons}>
               <Button
                 intent='destructive'
-                onClick={() => setShowEndForMeOptions(true)}
-                aria-label='End chat for me'
+                onClick={participantCount <= 1 ? onEndForAll : () => setShowEndConfirm(true)}
+                aria-label='Leave chat'
               >
-                End for me
-              </Button>
-              <Button
-                intent='destructive'
-                onClick={() => setShowEndConfirm(true)}
-                aria-label='End chat for everyone'
-              >
-                End for everyone
+                Leave
               </Button>
             </div>
           )}
@@ -1976,7 +2103,7 @@ function ChatView({
                   />
                 </div>
                 <div className={styles.settingsRow}>
-                  <label className={styles.settingsLabel}>Beep sound</label>
+                  <label className={styles.settingsLabel}>Message sound</label>
                   <OnOffToggle
                     enabled={localSettings.soundEnabled}
                     onToggle={() =>
@@ -1992,6 +2119,23 @@ function ChatView({
       {isPeerDisconnected && (
         <div className={styles.reconnectingIndicator}>
           Partner disconnected, waiting for reconnection...
+        </div>
+      )}
+      {showVoicePrivacyNotice && (
+        <div className={styles.voicePrivacyBanner}>
+          <p className={styles.voicePrivacyText}>
+            Voice calls connect directly between you and your partner
+            (peer-to-peer). This applies whether you start or accept a call. Your
+            IP address will be visible to them. Use a VPN if this concerns you.
+          </p>
+          <div className={styles.voicePrivacyActions}>
+            <Button intent='neutral' size='sm' onClick={handleVoicePrivacyCancel}>
+              Cancel
+            </Button>
+            <Button intent='positive' size='sm' onClick={handleVoicePrivacyAccept}>
+              I understand, continue
+            </Button>
+          </div>
         </div>
       )}
       {isReady && (
@@ -2127,8 +2271,14 @@ function ChatView({
             pollAllowMultiple={msg.pollAllowMultiple}
             pollMyVotes={msg.pollMyVotes}
             notefadeUrl={msg.notefadeUrl}
+            notefadeRevealedText={revealedNotes.get(msg.id)}
+            notefadeRevealed={msg.notefadeRevealed}
+            notefadeDestroyed={msg.notefadeDestroyed}
+            onRevealNotefade={handleRevealNotefade}
+            onDestroyNotefade={handleDestroyNotefade}
             onPollVote={isReady ? onPollVote : undefined}
             senderColor={msg.senderId ? senderColor(msg.senderId) : undefined}
+            resolveReactorName={resolveReactorName}
           />
         ))}
         {peerTyping && (

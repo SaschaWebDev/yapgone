@@ -4,7 +4,6 @@ import { z } from 'zod'
 import {
   generateKeyPair,
   exportPublicKey,
-  hkdfDerive,
   toBase64Url,
   fromBase64Url,
   concatBytes,
@@ -36,26 +35,31 @@ import {
   MAX_MESSAGE_LENGTH,
   VOICE_NOTE_CHUNK_BYTES,
   VOICE_NOTE_MAX_BYTES,
+  VOICE_NOTE_ASSEMBLY_TIMEOUT_MS,
   FILE_MAX_IMAGE_BYTES,
   FILE_MAX_GENERAL_BYTES,
   FILE_CHUNK_BYTES,
   FILE_SEND_DELAY_MS,
+  FILE_ASSEMBLY_TIMEOUT_MS,
+  FILE_MAX_CONCURRENT_TRANSFERS,
   IMAGE_MIME_TYPES,
   GALLERY_MAX_IMAGES,
 } from '@/constants'
-import type { ChatMessage } from './chat-helpers'
+import type { ChatMessage, GalleryImage } from './chat-helpers'
 import {
   generateMessageId,
   buildTextMessage,
   buildAudioMessage,
   buildFileMessage,
   buildNotefadeMessage,
+  buildNotefadeChatMessage,
   buildPollMessage,
   applyReaction,
   findReplyPreview,
   applyPollVote,
   insertSorted,
   chunkBytes,
+  concatChunks,
 } from './chat-helpers'
 
 export type ChatPhase =
@@ -69,9 +73,6 @@ export type ChatPhase =
   | 'expired'
   | 'room-closed'
   | 'error'
-
-const SALT = new TextEncoder().encode('yapgone-chat-root')
-const INFO = new Uint8Array(0)
 
 type VoiceHandlerRef = RefObject<((signal: VoiceSignal) => void) | null>
 
@@ -166,6 +167,8 @@ const DecryptedPayloadSchema = z.discriminatedUnion('kind', [
     action: z.enum(['add', 'remove']),
   }),
   z.object({ kind: z.literal('timed-consumed'), noteId: z.string().min(1) }),
+  z.object({ kind: z.literal('notefade-chat-revealed'), noteId: z.string().min(1) }),
+  z.object({ kind: z.literal('notefade-chat-destroyed'), noteId: z.string().min(1) }),
   z.object({
     kind: z.literal('poll'),
     pollId: z.string().min(1).max(32),
@@ -185,6 +188,13 @@ const DecryptedPayloadSchema = z.discriminatedUnion('kind', [
   }),
   z.object({
     kind: z.literal('notefade'),
+    url: z.string().url(),
+    msgId: z.string().min(1).max(32).optional(),
+    replyTo: z.string().min(1).max(32).optional(),
+    ts: z.number().optional(),
+  }),
+  z.object({
+    kind: z.literal('notefade-chat'),
     url: z.string().url(),
     msgId: z.string().min(1).max(32).optional(),
     replyTo: z.string().min(1).max(32).optional(),
@@ -273,6 +283,7 @@ export function useGroupChat(
   const [myPubKeyRaw, setMyPubKeyRaw] = useState<Uint8Array | null>(null)
   const [peerPubKeysMap, setPeerPubKeysMap] = useState<Map<string, Uint8Array>>(new Map())
 
+  const myClientIdRef = useRef<string | null>(null)
   const wsRef = useRef<ReconnectingChatWebSocket | null>(null)
   const groupCryptoRef = useRef<GroupMemberCrypto | null>(null)
   const keyPairRef = useRef<CryptoKeyPair | null>(null)
@@ -307,6 +318,376 @@ export function useGroupChat(
   const getPeerDisplayName = useCallback((peerId: string): string | undefined => {
     return peerUsernamesRef.current.get(peerId) ?? undefined
   }, [])
+
+  // ─── Voice note / file / gallery receive handlers ───
+
+  const cleanupVoiceNoteAssemblies = useCallback(() => {
+    const now = Date.now()
+    for (const [noteId, assembly] of voiceNoteAssembliesRef.current) {
+      if (now - assembly.createdAt > VOICE_NOTE_ASSEMBLY_TIMEOUT_MS) {
+        voiceNoteAssembliesRef.current.delete(noteId)
+      }
+    }
+  }, [])
+
+  const onVoiceNotePayload = useCallback((
+    payload: { kind: 'voice-note-meta'; noteId: string; mimeType: string; durationMs: number; totalChunks: number; totalBytes: number; timed?: boolean; ts?: number }
+      | { kind: 'voice-note-chunk'; noteId: string; index: number; data: string }
+      | { kind: 'voice-note-complete'; noteId: string },
+    senderId: string,
+  ) => {
+    cleanupVoiceNoteAssemblies()
+
+    if (payload.kind === 'voice-note-meta') {
+      if (payload.totalBytes > VOICE_NOTE_MAX_BYTES) return
+      voiceNoteAssembliesRef.current.set(payload.noteId, {
+        mimeType: payload.mimeType,
+        durationMs: payload.durationMs,
+        totalChunks: payload.totalChunks,
+        totalBytes: payload.totalBytes,
+        receivedBytes: 0,
+        chunks: new Map(),
+        createdAt: Date.now(),
+        timed: payload.timed || undefined,
+        ts: payload.ts,
+      })
+      return
+    }
+
+    if (payload.kind === 'voice-note-chunk') {
+      const assembly = voiceNoteAssembliesRef.current.get(payload.noteId)
+      if (!assembly) return
+      if (payload.index >= assembly.totalChunks) return
+      if (assembly.chunks.has(payload.index)) return
+      const chunk = fromBase64Url(payload.data)
+      const nextSize = assembly.receivedBytes + chunk.length
+      if (nextSize > VOICE_NOTE_MAX_BYTES || nextSize > assembly.totalBytes) {
+        voiceNoteAssembliesRef.current.delete(payload.noteId)
+        return
+      }
+      assembly.chunks.set(payload.index, chunk)
+      assembly.receivedBytes = nextSize
+      return
+    }
+
+    // voice-note-complete
+    const assembly = voiceNoteAssembliesRef.current.get(payload.noteId)
+    if (!assembly) return
+    if (
+      assembly.chunks.size !== assembly.totalChunks ||
+      assembly.receivedBytes !== assembly.totalBytes
+    ) {
+      voiceNoteAssembliesRef.current.delete(payload.noteId)
+      return
+    }
+
+    const orderedChunks: Uint8Array[] = []
+    for (let i = 0; i < assembly.totalChunks; i++) {
+      const chunk = assembly.chunks.get(i)
+      if (!chunk) {
+        voiceNoteAssembliesRef.current.delete(payload.noteId)
+        return
+      }
+      orderedChunks.push(chunk)
+    }
+    const bytes = concatChunks(orderedChunks)
+    const arrayBuffer = new ArrayBuffer(bytes.length)
+    new Uint8Array(arrayBuffer).set(bytes)
+    const blob = new Blob([arrayBuffer], { type: assembly.mimeType })
+    const objectUrl = URL.createObjectURL(blob)
+    trackAudioUrl(objectUrl)
+    const rcvNoteId = payload.noteId
+    const peerName = getPeerDisplayName(senderId)
+    setMessages(prev => insertSorted(prev, {
+      ...buildAudioMessage(
+        'peer', objectUrl, assembly.durationMs, peerName,
+        rcvNoteId, assembly.timed, assembly.ts,
+      ),
+      senderId,
+    }))
+    void computeWaveform(blob).then(w => {
+      setMessages(prev => prev.map(m => m.id === rcvNoteId ? { ...m, waveform: w } : m))
+    })
+    voiceNoteAssembliesRef.current.delete(payload.noteId)
+  }, [cleanupVoiceNoteAssemblies, trackAudioUrl, getPeerDisplayName])
+
+  const cleanupFileAssemblies = useCallback(() => {
+    const now = Date.now()
+    for (const [fileId, assembly] of fileAssembliesRef.current) {
+      if (now - assembly.createdAt > FILE_ASSEMBLY_TIMEOUT_MS) {
+        fileAssembliesRef.current.delete(fileId)
+        setMessages(prev => prev.filter(m => m.id !== fileId))
+      }
+    }
+  }, [])
+
+  const onFilePayload = useCallback((
+    payload: { kind: 'file-meta'; fileId: string; fileName: string; mimeType: string; totalChunks: number; totalBytes: number; timed?: boolean; ts?: number; galleryId?: string }
+      | { kind: 'file-chunk'; fileId: string; index: number; data: string; galleryId?: string }
+      | { kind: 'file-complete'; fileId: string; galleryId?: string },
+    senderId: string,
+  ) => {
+    cleanupFileAssemblies()
+
+    // Gallery-routed file: update gallery message instead of standalone
+    if (payload.galleryId) {
+      const galleryAssembly = galleryAssembliesRef.current.get(payload.galleryId)
+      if (!galleryAssembly) return
+
+      if (payload.kind === 'file-meta') {
+        const maxBytes = fileMaxBytes(payload.mimeType)
+        if (payload.totalBytes > maxBytes) {
+          galleryAssembly.failedFileIds.add(payload.fileId)
+          return
+        }
+        fileAssembliesRef.current.set(payload.fileId, {
+          fileName: payload.fileName,
+          mimeType: payload.mimeType,
+          totalChunks: payload.totalChunks,
+          totalBytes: payload.totalBytes,
+          receivedBytes: 0,
+          chunks: new Map(),
+          createdAt: Date.now(),
+        })
+        setMessages(prev => prev.map(m => {
+          if (m.id !== payload.galleryId || !m.gallery) return m
+          return { ...m, gallery: m.gallery.map(gi =>
+            gi.fileId === payload.fileId ? { ...gi, transferProgress: 0 } : gi
+          )}
+        }))
+        return
+      }
+
+      if (payload.kind === 'file-chunk') {
+        const assembly = fileAssembliesRef.current.get(payload.fileId)
+        if (!assembly) return
+        if (payload.index >= assembly.totalChunks) return
+        if (assembly.chunks.has(payload.index)) return
+        const chunk = fromBase64Url(payload.data)
+        const nextSize = assembly.receivedBytes + chunk.length
+        const maxBytes = fileMaxBytes(assembly.mimeType)
+        if (nextSize > maxBytes || nextSize > assembly.totalBytes) {
+          fileAssembliesRef.current.delete(payload.fileId)
+          galleryAssembly.failedFileIds.add(payload.fileId)
+          return
+        }
+        assembly.chunks.set(payload.index, chunk)
+        assembly.receivedBytes = nextSize
+        const progress = assembly.totalBytes > 0 ? nextSize / assembly.totalBytes : 0
+        setMessages(prev => prev.map(m => {
+          if (m.id !== payload.galleryId || !m.gallery) return m
+          return { ...m, gallery: m.gallery.map(gi =>
+            gi.fileId === payload.fileId ? { ...gi, transferProgress: progress } : gi
+          )}
+        }))
+        return
+      }
+
+      // file-complete for gallery image
+      const assembly = fileAssembliesRef.current.get(payload.fileId)
+      if (!assembly) {
+        galleryAssembly.failedFileIds.add(payload.fileId)
+        return
+      }
+      if (
+        assembly.chunks.size !== assembly.totalChunks ||
+        assembly.receivedBytes !== assembly.totalBytes
+      ) {
+        fileAssembliesRef.current.delete(payload.fileId)
+        galleryAssembly.failedFileIds.add(payload.fileId)
+        return
+      }
+
+      const orderedChunks: Uint8Array[] = []
+      for (let i = 0; i < assembly.totalChunks; i++) {
+        const chunk = assembly.chunks.get(i)
+        if (!chunk) {
+          fileAssembliesRef.current.delete(payload.fileId)
+          galleryAssembly.failedFileIds.add(payload.fileId)
+          return
+        }
+        orderedChunks.push(chunk)
+      }
+      const fileBytes = concatChunks(orderedChunks)
+      const arrayBuffer = new ArrayBuffer(fileBytes.length)
+      new Uint8Array(arrayBuffer).set(fileBytes)
+      const blob = new Blob([arrayBuffer], { type: assembly.mimeType })
+      const objectUrl = URL.createObjectURL(blob)
+      trackFileUrl(objectUrl)
+      galleryAssembly.completedFileIds.add(payload.fileId)
+      fileAssembliesRef.current.delete(payload.fileId)
+      setMessages(prev => prev.map(m => {
+        if (m.id !== payload.galleryId || !m.gallery) return m
+        return { ...m, gallery: m.gallery.map(gi =>
+          gi.fileId === payload.fileId ? { ...gi, fileUrl: objectUrl, transferProgress: undefined } : gi
+        )}
+      }))
+      return
+    }
+
+    // Standalone file (non-gallery)
+    if (payload.kind === 'file-meta') {
+      if (fileAssembliesRef.current.size >= FILE_MAX_CONCURRENT_TRANSFERS) return
+      const maxBytes = fileMaxBytes(payload.mimeType)
+      if (payload.totalBytes > maxBytes) return
+      fileAssembliesRef.current.set(payload.fileId, {
+        fileName: payload.fileName,
+        mimeType: payload.mimeType,
+        totalChunks: payload.totalChunks,
+        totalBytes: payload.totalBytes,
+        receivedBytes: 0,
+        chunks: new Map(),
+        createdAt: Date.now(),
+        timed: payload.timed || undefined,
+        ts: payload.ts,
+      })
+      const msgKind = IMAGE_MIME_TYPES.has(payload.mimeType) ? 'image' as const : 'file' as const
+      const peerName = getPeerDisplayName(senderId)
+      setMessages(prev => insertSorted(prev, {
+        ...buildFileMessage(
+          'peer', msgKind, '', payload.fileName,
+          payload.mimeType, payload.totalBytes,
+          peerName, payload.fileId, payload.timed, payload.ts,
+        ),
+        senderId,
+        transferProgress: 0,
+      }))
+      return
+    }
+
+    if (payload.kind === 'file-chunk') {
+      const assembly = fileAssembliesRef.current.get(payload.fileId)
+      if (!assembly) return
+      if (payload.index >= assembly.totalChunks) return
+      if (assembly.chunks.has(payload.index)) return
+      const chunk = fromBase64Url(payload.data)
+      const nextSize = assembly.receivedBytes + chunk.length
+      const maxBytes = fileMaxBytes(assembly.mimeType)
+      if (nextSize > maxBytes || nextSize > assembly.totalBytes) {
+        fileAssembliesRef.current.delete(payload.fileId)
+        setMessages(prev => prev.filter(m => m.id !== payload.fileId))
+        return
+      }
+      assembly.chunks.set(payload.index, chunk)
+      assembly.receivedBytes = nextSize
+      const progress = assembly.totalBytes > 0 ? nextSize / assembly.totalBytes : 0
+      setMessages(prev => prev.map(m =>
+        m.id === payload.fileId ? { ...m, transferProgress: progress } : m
+      ))
+      return
+    }
+
+    // file-complete (standalone)
+    const assembly = fileAssembliesRef.current.get(payload.fileId)
+    if (!assembly) return
+    if (
+      assembly.chunks.size !== assembly.totalChunks ||
+      assembly.receivedBytes !== assembly.totalBytes
+    ) {
+      fileAssembliesRef.current.delete(payload.fileId)
+      setMessages(prev => prev.filter(m => m.id !== payload.fileId))
+      return
+    }
+
+    const orderedChunks: Uint8Array[] = []
+    for (let i = 0; i < assembly.totalChunks; i++) {
+      const chunk = assembly.chunks.get(i)
+      if (!chunk) {
+        fileAssembliesRef.current.delete(payload.fileId)
+        setMessages(prev => prev.filter(m => m.id !== payload.fileId))
+        return
+      }
+      orderedChunks.push(chunk)
+    }
+    const fileBytes = concatChunks(orderedChunks)
+    const arrayBuffer = new ArrayBuffer(fileBytes.length)
+    new Uint8Array(arrayBuffer).set(fileBytes)
+    const blob = new Blob([arrayBuffer], { type: assembly.mimeType })
+    const objectUrl = URL.createObjectURL(blob)
+    trackFileUrl(objectUrl)
+    const msgKind = IMAGE_MIME_TYPES.has(assembly.mimeType) ? 'image' as const : 'file' as const
+    const peerName = getPeerDisplayName(senderId)
+    setMessages(prev => prev.map(m =>
+      m.id === payload.fileId ? {
+        ...buildFileMessage(
+          'peer', msgKind, objectUrl, assembly.fileName,
+          assembly.mimeType, assembly.totalBytes,
+          peerName, payload.fileId, assembly.timed, assembly.ts,
+        ),
+        senderId,
+        reactions: m.reactions,
+        transferProgress: undefined,
+      } : m
+    ))
+    fileAssembliesRef.current.delete(payload.fileId)
+  }, [cleanupFileAssemblies, trackFileUrl, getPeerDisplayName])
+
+  const onGalleryPayload = useCallback((
+    data: { kind: 'gallery-meta'; galleryId: string; caption?: string; timed?: boolean; ts?: number; images: Array<{ fileId: string; fileName: string; mimeType: string; totalChunks: number; totalBytes: number }> }
+      | { kind: 'gallery-complete'; galleryId: string },
+    senderId: string,
+  ) => {
+    if (data.kind === 'gallery-meta') {
+      if (data.images.length === 0 || data.images.length > GALLERY_MAX_IMAGES) return
+      const galleryImages: GalleryImage[] = data.images.map(img => ({
+        fileId: img.fileId,
+        fileName: img.fileName,
+        mimeType: img.mimeType,
+        fileSize: img.totalBytes,
+      }))
+      galleryAssembliesRef.current.set(data.galleryId, {
+        caption: data.caption,
+        timed: data.timed || undefined,
+        ts: data.ts,
+        expectedImages: data.images.map(img => ({
+          fileId: img.fileId,
+          fileName: img.fileName,
+          mimeType: img.mimeType,
+          totalBytes: img.totalBytes,
+        })),
+        completedFileIds: new Set(),
+        failedFileIds: new Set(),
+        galleryComplete: false,
+        createdAt: Date.now(),
+      })
+      const peerName = getPeerDisplayName(senderId)
+      setMessages(prev => insertSorted(prev, {
+        id: data.galleryId,
+        kind: 'gallery',
+        text: data.caption,
+        sender: 'peer',
+        senderId,
+        displayName: peerName,
+        timestamp: data.ts ?? Date.now(),
+        reactions: [],
+        timed: data.timed || undefined,
+        gallery: galleryImages,
+      }))
+      return
+    }
+
+    // gallery-complete
+    const galleryAssembly = galleryAssembliesRef.current.get(data.galleryId)
+    if (!galleryAssembly) return
+    galleryAssembly.galleryComplete = true
+
+    // If zero images succeeded, remove gallery message
+    if (galleryAssembly.completedFileIds.size === 0) {
+      setMessages(prev => prev.filter(m => m.id !== data.galleryId))
+      galleryAssembliesRef.current.delete(data.galleryId)
+      return
+    }
+
+    // Remove failed images from gallery
+    if (galleryAssembly.failedFileIds.size > 0) {
+      setMessages(prev => prev.map(m => {
+        if (m.id !== data.galleryId || !m.gallery) return m
+        const filtered = m.gallery.filter(gi => !galleryAssembly.failedFileIds.has(gi.fileId))
+        return filtered.length > 0 ? { ...m, gallery: filtered } : m
+      }))
+    }
+    galleryAssembliesRef.current.delete(data.galleryId)
+  }, [getPeerDisplayName])
 
   /**
    * Encrypt and send a message.
@@ -474,7 +855,7 @@ export function useGroupChat(
     }
   }, [refreshInviteUrl, role, roomId])
 
-  const cleanup = useCallback(() => {
+  const cleanup = useCallback((skipLeave = false) => {
     if (cleanedUpRef.current) return
     cleanedUpRef.current = true
     if (configTimerRef.current) {
@@ -504,7 +885,9 @@ export function useGroupChat(
       const ws = wsRef.current
       wsRef.current = null
       ws.cancelReconnect()
-      try { ws.send({ type: 'leave' }) } catch { /* ignore */ }
+      if (!skipLeave) {
+        try { ws.send({ type: 'leave' }) } catch { /* ignore */ }
+      }
       setTimeout(() => ws.close(), 100)
     }
   }, [])
@@ -593,9 +976,12 @@ export function useGroupChat(
         const peerPubKeyRaw = fromBase64Url(pubkeyResult.data.key)
 
         // Establish pairwise ratchet
-        const { state: updated } = await establishPairwiseRatchet(gc, senderId, peerPubKeyRaw)
+        const { state: updated, rootKey } = await establishPairwiseRatchet(gc, senderId, peerPubKeyRaw)
         groupCryptoRef.current = updated
         setPeerPubKeysMap(new Map(updated.peerPubKeys))
+
+        // Derive media key from shared ECDH root key (same for both peers)
+        setMediaKeyRaw(await deriveMediaKeyRaw(rootKey))
 
         // Send our sender key to this peer
         const result = await encryptSenderKeyForPeer(groupCryptoRef.current, senderId)
@@ -714,7 +1100,7 @@ export function useGroupChat(
             })
           })
         } else if (data.kind === 'reaction') {
-          setMessages(prev => applyReaction(prev, data.msgId, data.emoji, data.action, false))
+          setMessages(prev => applyReaction(prev, data.msgId, data.emoji, data.action, false, senderId))
         } else if (data.kind === 'username-set') {
           const nextUsername = data.username.trim().slice(0, 24)
           if (!nextUsername) return
@@ -725,6 +1111,14 @@ export function useGroupChat(
         } else if (data.kind === 'timed-consumed') {
           setMessages(prev => prev.map(msg =>
             msg.id === data.noteId ? { ...msg, timedConsumed: true } : msg
+          ))
+        } else if (data.kind === 'notefade-chat-revealed') {
+          setMessages(prev => prev.map(msg =>
+            msg.id === data.noteId ? { ...msg, notefadeRevealed: true } : msg
+          ))
+        } else if (data.kind === 'notefade-chat-destroyed') {
+          setMessages(prev => prev.map(msg =>
+            msg.id === data.noteId ? { ...msg, notefadeDestroyed: true } : msg
           ))
         } else if (data.kind === 'poll') {
           setMessages(prev => insertSorted(prev, {
@@ -749,6 +1143,17 @@ export function useGroupChat(
               replyPreview,
             })
           })
+        } else if (data.kind === 'notefade-chat') {
+          const id = data.msgId ?? generateMessageId()
+          setMessages(prev => {
+            const replyPreview = data.replyTo ? findReplyPreview(prev, data.replyTo) : undefined
+            return insertSorted(prev, {
+              ...buildNotefadeChatMessage('peer', data.url, peerName, id, data.ts),
+              senderId,
+              replyTo: data.replyTo,
+              replyPreview,
+            })
+          })
         } else if (data.kind === 'rekey-request') {
           // A peer is requesting everyone to rekey
           const gc = groupCryptoRef.current
@@ -767,8 +1172,24 @@ export function useGroupChat(
         ) {
           voiceHandlerRef?.current?.(data)
         }
-        // Voice notes, file transfers, galleries handled similarly but omitted for brevity
-        // — they use the same assembly pattern as use-chat.ts
+        if (
+          data.kind === 'voice-note-meta' ||
+          data.kind === 'voice-note-chunk' ||
+          data.kind === 'voice-note-complete'
+        ) {
+          onVoiceNotePayload(data, senderId)
+        } else if (
+          data.kind === 'file-meta' ||
+          data.kind === 'file-chunk' ||
+          data.kind === 'file-complete'
+        ) {
+          onFilePayload(data, senderId)
+        } else if (
+          data.kind === 'gallery-meta' ||
+          data.kind === 'gallery-complete'
+        ) {
+          onGalleryPayload(data, senderId)
+        }
       } catch {
         // Decryption or parse failed — ignore
       }
@@ -817,6 +1238,7 @@ export function useGroupChat(
           if (msg.type === 'peer-list') {
             const { clientIds, yourId } = msg
             setMyClientId(yourId)
+            myClientIdRef.current = yourId
 
             // Initialize group crypto
             const gc = await initGroupMember(yourId, kp)
@@ -837,6 +1259,7 @@ export function useGroupChat(
                     senderId: yourId,
                   }),
                 })
+                pendingKeyExchangeRef.current.add(peerId)
               }
               setPhase(clientIds.length > 0 ? 'key-exchange' : 'waiting')
             } else if (role === 'creator') {
@@ -844,11 +1267,6 @@ export function useGroupChat(
                 setPhase('key-exchange')
               }
             }
-
-            // Also derive media key from our own key material for voice E2EE
-            const pubKeyRaw = await exportPublicKey(kp.publicKey)
-            const fakeRoot = await hkdfDerive(pubKeyRaw, SALT, INFO, 32)
-            setMediaKeyRaw(await deriveMediaKeyRaw(fakeRoot))
 
             return
           }
@@ -996,10 +1414,20 @@ export function useGroupChat(
     )))
   }, [encryptAndSend])
 
+  const sendNotefadeChat = useCallback(async (url: string) => {
+    if (!groupCryptoRef.current || !wsRef.current) return
+    const msgId = generateMessageId()
+    const ts = Date.now()
+    await encryptAndSend({ kind: 'notefade-chat', url, msgId, ts })
+    setMessages(prev => insertSorted(prev, buildNotefadeChatMessage(
+      'self', url, localUsernameRef.current ?? undefined, msgId, ts,
+    )))
+  }, [encryptAndSend])
+
   const sendReaction = useCallback(async (msgId: string, emoji: string, action: 'add' | 'remove') => {
     if (!groupCryptoRef.current || !wsRef.current) return
     await encryptAndSend({ kind: 'reaction', msgId, emoji, action })
-    setMessages(prev => applyReaction(prev, msgId, emoji, action, true))
+    setMessages(prev => applyReaction(prev, msgId, emoji, action, true, myClientIdRef.current ?? undefined))
   }, [encryptAndSend])
 
   const removeTimedMessage = useCallback((targetMsgId: string) => {
@@ -1009,6 +1437,19 @@ export function useGroupChat(
   const sendTimedConsumed = useCallback(async (noteId: string) => {
     if (!groupCryptoRef.current || !wsRef.current) return
     await encryptAndSend({ kind: 'timed-consumed', noteId })
+  }, [encryptAndSend])
+
+  const sendNotefadeChatRevealed = useCallback(async (noteId: string) => {
+    if (!groupCryptoRef.current || !wsRef.current) return
+    await encryptAndSend({ kind: 'notefade-chat-revealed', noteId })
+  }, [encryptAndSend])
+
+  const sendNotefadeChatDestroyed = useCallback(async (noteId: string) => {
+    if (!groupCryptoRef.current || !wsRef.current) return
+    await encryptAndSend({ kind: 'notefade-chat-destroyed', noteId })
+    setMessages(prev => prev.map(msg =>
+      msg.id === noteId ? { ...msg, notefadeDestroyed: true } : msg
+    ))
   }, [encryptAndSend])
 
   const sendVoiceSignal = useCallback(async (signal: VoiceSignal) => {
@@ -1224,7 +1665,7 @@ export function useGroupChat(
       wsRef.current.cancelReconnect()
       try { wsRef.current.send({ type: 'close-room' }) } catch { /* ignore */ }
     }
-    cleanup()
+    cleanup(true)
     setPhase('room-closed')
     window.location.hash = ''
   }, [cleanup])
@@ -1243,7 +1684,10 @@ export function useGroupChat(
     sendReaction,
     removeTimedMessage,
     sendTimedConsumed,
+    sendNotefadeChatRevealed,
+    sendNotefadeChatDestroyed,
     sendNotefade,
+    sendNotefadeChat,
     sendPoll,
     sendPollVote,
     sendGallery,
