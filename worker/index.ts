@@ -57,9 +57,19 @@ function isNotefadeRateLimited(ip: string): boolean {
 }
 
 const NOTEFADE_API_URL = 'https://shard-api.notefade.com/api/v1/create-note'
+const NOTEFADE_READ_API_URL = 'https://shard-api.notefade.com/api/v1/read-note'
 
 const NotefadeRequestSchema = z.object({
   text: z.string().min(1).max(1800),
+})
+
+const NotefadeReadRequestSchema = z.object({
+  url: z.string().min(1),
+})
+
+const NotefadeReadUpstreamResponseSchema = z.object({
+  text: z.string(),
+  shardId: z.string(),
 })
 
 const NotefadeUpstreamResponseSchema = z.object({
@@ -213,6 +223,53 @@ export default {
       }
 
       return jsonResponse({ url: upstreamParsed.data.url }, 201)
+    }
+
+    // POST /api/notefade/read-note — proxy to notefade read API
+    if (url.pathname === '/api/notefade/read-note' && request.method === 'POST') {
+      if (!env.NOTEFADE_API_KEY) {
+        return jsonResponse({ error: 'Notefade integration not configured' }, 501)
+      }
+
+      const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown'
+      if (isNotefadeRateLimited(ip)) {
+        return jsonResponse({ error: 'Rate limit exceeded' }, 429)
+      }
+
+      const rawBody: unknown = await request.json().catch(() => null)
+      const parsed = NotefadeReadRequestSchema.safeParse(rawBody)
+      if (!parsed.success) {
+        return jsonResponse({ error: 'Invalid request body' }, 400)
+      }
+
+      const upstream = await fetch(NOTEFADE_READ_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Api-Key': env.NOTEFADE_API_KEY,
+        },
+        body: JSON.stringify({ url: parsed.data.url }),
+      }).catch(() => null)
+
+      if (!upstream) {
+        return jsonResponse({ error: 'Upstream error' }, 502)
+      }
+
+      if (upstream.status === 404) {
+        return jsonResponse({ error: 'Note not found or already read' }, 404)
+      }
+
+      if (!upstream.ok) {
+        return jsonResponse({ error: 'Upstream error' }, 502)
+      }
+
+      const upstreamBody: unknown = await upstream.json().catch(() => null)
+      const upstreamParsed = NotefadeReadUpstreamResponseSchema.safeParse(upstreamBody)
+      if (!upstreamParsed.success) {
+        return jsonResponse({ error: 'Upstream error' }, 502)
+      }
+
+      return jsonResponse({ text: upstreamParsed.data.text, shardId: upstreamParsed.data.shardId }, 200)
     }
 
     return jsonResponse({ error: 'Not found' }, 404)

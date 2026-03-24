@@ -9,7 +9,7 @@ export interface MessageHeader {
 export type ClientMessage =
   | { type: 'pubkey'; key: string }
   | { type: 'message'; header: MessageHeader; payload: string }
-  | { type: 'direct'; targetId: string; payload: string }
+  | { type: 'direct'; targetId: string; payload: string; senderId?: string }
   | { type: 'typing'; active: boolean }
   | { type: 'leave' }
   | { type: 'close-room' }
@@ -49,6 +49,7 @@ const DirectMessageSchema = z.object({
   type: z.literal('direct'),
   targetId: z.string().min(1),
   payload: z.string(),
+  senderId: z.string().optional(),
 })
 
 const LeaveMessageSchema = z.object({

@@ -63,6 +63,7 @@ export async function fetchShard(roomId: string): Promise<string> {
 }
 
 const NotefadeResponseSchema = z.object({ url: z.string().url() })
+const NotefadeReadResponseSchema = z.object({ text: z.string(), shardId: z.string() })
 const NotefadeErrorSchema = z.object({ error: z.string() })
 
 export async function createNotefadeNote(text: string): Promise<string> {
@@ -82,6 +83,28 @@ export async function createNotefadeNote(text: string): Promise<string> {
   const data: unknown = await res.json()
   const parsed = NotefadeResponseSchema.parse(data)
   return parsed.url
+}
+
+export async function readNotefadeNote(url: string): Promise<string> {
+  const res = await fetch(`${API_BASE_URL}/api/notefade/read-note`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  })
+  if (!res.ok) {
+    if (res.status === 404) {
+      throw new Error('Note not found or already read')
+    }
+    const body: unknown = await res.json().catch(() => null)
+    const errorParsed = NotefadeErrorSchema.safeParse(body)
+    const message = errorParsed.success
+      ? errorParsed.data.error
+      : `Failed to read note: ${res.status}`
+    throw new Error(message)
+  }
+  const data: unknown = await res.json()
+  const parsed = NotefadeReadResponseSchema.parse(data)
+  return parsed.text
 }
 
 export function buildWsUrl(roomId: string): string {
