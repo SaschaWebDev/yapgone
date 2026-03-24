@@ -11,6 +11,7 @@
 .video {
   display: block;
   width: 100%;
+  min-height: 200px;
   max-height: 50vh;
   object-fit: contain;
   background: #000;

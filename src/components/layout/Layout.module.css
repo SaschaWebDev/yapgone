@@ -66,11 +66,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 42px;
   background: none;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
-  padding: 0.35rem 0.6rem;
+  padding: 0.35rem 0;
   font-size: 1rem;
   line-height: 1;
   transition: color 0.15s, border-color 0.15s;

@@ -227,15 +227,6 @@ export function VoiceControls({
     onAcceptCall();
   };
 
-  const handleStartCallClick = () => {
-    if (_requiresPrivacyGate(privacyAcknowledged)) {
-      setShowPrivacyNotice(true);
-      setPendingPrivacyAction('start');
-      return;
-    }
-    onStartCall();
-  };
-
   const handleAcceptCallClick = () => {
     if (_requiresPrivacyGate(privacyAcknowledged)) {
       setShowPrivacyNotice(true);
@@ -288,19 +279,7 @@ export function VoiceControls({
   }
 
   if (callState === 'idle') {
-    return (
-      <div className={styles.wrapper}>
-        <button
-          className={styles.callButton}
-          onClick={handleStartCallClick}
-          title='Start voice call'
-          aria-label='Start voice call'
-        >
-          <IconPhone size={21} />
-          <span className={styles.callLabel}>Voice Call</span>
-        </button>
-      </div>
-    );
+    return null;
   }
 
   if (callState === 'requesting') {

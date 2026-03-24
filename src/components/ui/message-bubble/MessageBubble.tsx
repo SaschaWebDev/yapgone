@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { formatMessage } from '@/utils/format-message'
 import { isEmojiOnly } from '@/utils'
 import { EmojiQuickPick, EmojiFullPicker } from '../emoji-picker'
+import { ReactionDetail } from '../reaction-detail'
 import { IconNotefade } from '../icons'
 import type { MessageReaction, PollOption, GalleryImage } from '@/hooks/use-chat'
 import { TIMED_MESSAGE_TTL_MS, TIMED_MESSAGE_FADEOUT_MS, TIMED_VOICE_FALLBACK_TTL_MS } from '@/constants'
@@ -10,7 +11,7 @@ import styles from './MessageBubble.module.css'
 type PickerMode = 'closed' | 'compact' | 'expanded'
 
 interface MessageBubbleProps {
-  kind?: 'text' | 'audio' | 'image' | 'file' | 'poll' | 'gallery' | 'notefade'
+  kind?: 'text' | 'audio' | 'image' | 'file' | 'poll' | 'gallery' | 'notefade' | 'notefade-chat'
   text?: string
   audioUrl?: string
   durationMs?: number
@@ -49,9 +50,15 @@ interface MessageBubbleProps {
   pollId?: string
   onPollVote?: (pollId: string, optionIndices: number[]) => void
   notefadeUrl?: string
+  notefadeRevealedText?: string
+  notefadeRevealed?: boolean
+  notefadeDestroyed?: boolean
+  onRevealNotefade?: (messageId: string, url: string) => void
+  onDestroyNotefade?: (messageId: string, url: string) => void
   gallery?: GalleryImage[]
   onGalleryImageClick?: (index: number) => void
   senderColor?: string
+  resolveReactorName?: (reaction: MessageReaction) => string
 }
 
 function formatSeconds(seconds: number): string {
@@ -532,11 +539,18 @@ export function MessageBubble({
   pollId,
   onPollVote,
   notefadeUrl,
+  notefadeRevealedText,
+  notefadeRevealed,
+  notefadeDestroyed,
+  onRevealNotefade,
+  onDestroyNotefade,
   gallery,
   onGalleryImageClick,
   senderColor: senderColorProp,
+  resolveReactorName,
 }: MessageBubbleProps) {
   const [pickerMode, setPickerMode] = useState<PickerMode>('closed')
+  const [showReactionDetail, setShowReactionDetail] = useState(false)
   const [copyDone, setCopyDone] = useState(false)
   const [compact, setCompact] = useState(false)
   const [timedTimerProgress, setTimedTimerProgress] = useState(0)
@@ -548,6 +562,7 @@ export function MessageBubble({
   const onTimedExpireRef = useRef(onTimedExpire)
   const bubbleRef = useRef<HTMLDivElement>(null)
   const emojiTriggerRef = useRef<HTMLButtonElement>(null)
+  const reactionPillRef = useRef<HTMLButtonElement>(null)
 
   onTimedExpireRef.current = onTimedExpire
 
@@ -677,12 +692,12 @@ export function MessageBubble({
     setPickerMode('expanded')
   }, [])
 
-  const handleReactionBadgeClick = useCallback((emoji: string, hasSelf: boolean) => {
-    onReact?.(emoji)
-    if (hasSelf) {
-      // Will toggle off — already handled by parent via action='remove'
-    }
-  }, [onReact])
+  const handlePillClick = useCallback(() => {
+    setShowReactionDetail(prev => {
+      if (!prev) setPickerMode('closed')
+      return !prev
+    })
+  }, [])
 
   if (sender === 'system') {
     return (
@@ -705,7 +720,7 @@ export function MessageBubble({
   const anchorRect = emojiTriggerRef.current?.getBoundingClientRect()
 
   return (
-    <div className={`${styles.bubbleWrapper} ${isSelf ? styles.bubbleWrapperSelf : styles.bubbleWrapperPeer}${kind === 'audio' ? ` ${styles.bubbleWrapperAudio}` : ''}${kind === 'image' ? ` ${styles.bubbleWrapperImage}` : ''}${kind === 'file' ? ` ${styles.bubbleWrapperFile}` : ''}${kind === 'gallery' ? ` ${styles.bubbleWrapperGallery}` : ''}${kind === 'notefade' ? ` ${styles.bubbleWrapperNotefade}` : ''}${hasReactions ? ` ${styles.bubbleWrapperHasReactions}` : ''}${emojiOnly ? ` ${styles.bubbleWrapperEmoji}` : ''}${fadingOut ? ` ${styles.timedFadingOut}` : ''}`} data-msg-id={msgId} role="listitem">
+    <div className={`${styles.bubbleWrapper} ${isSelf ? styles.bubbleWrapperSelf : styles.bubbleWrapperPeer}${kind === 'audio' ? ` ${styles.bubbleWrapperAudio}` : ''}${kind === 'image' ? ` ${styles.bubbleWrapperImage}` : ''}${kind === 'file' ? ` ${styles.bubbleWrapperFile}` : ''}${kind === 'gallery' ? ` ${styles.bubbleWrapperGallery}` : ''}${kind === 'notefade' || kind === 'notefade-chat' ? ` ${styles.bubbleWrapperNotefade}` : ''}${hasReactions ? ` ${styles.bubbleWrapperHasReactions}` : ''}${emojiOnly ? ` ${styles.bubbleWrapperEmoji}` : ''}${fadingOut ? ` ${styles.timedFadingOut}` : ''}`} data-msg-id={msgId} role="listitem">
       <div
         ref={bubbleRef}
         className={`${styles.bubble} ${isSelf ? styles.self : styles.peer}${compact && kind !== 'audio' ? ` ${styles.compactActions}` : ''}${kind === 'audio' ? ` ${styles.audioActions}` : ''}${emojiOnly ? ` ${styles.emojiOnlyBubble}` : ''}${skipAnimation ? ` ${styles.noAnimation}` : ''}`}
@@ -855,6 +870,70 @@ export function MessageBubble({
               {time}
             </time>
           </>
+        ) : kind === 'notefade-chat' && notefadeUrl ? (
+          <>
+            <div className={styles.notefadeChatCard}>
+              <div className={styles.notefadeCardHeader}>
+                <IconNotefade size={18} />
+                <span className={styles.notefadeCardTitle}>Secret note</span>
+              </div>
+              {notefadeDestroyed ? (
+                <span className={styles.notefadeStatusLabel}>Note was destroyed</span>
+              ) : isSelf ? (
+                notefadeRevealed ? (
+                  <span className={styles.notefadeStatusLabel}>
+                    Note was revealed
+                  </span>
+                ) : (
+                  <>
+                    <p className={styles.notefadeCardBody}>
+                      Waiting for recipient to reveal this note.
+                    </p>
+                    <button
+                      type="button"
+                      className={styles.notefadeDestroyBtn}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        if (msgId && onDestroyNotefade) {
+                          onDestroyNotefade(msgId, notefadeUrl)
+                        }
+                      }}
+                    >
+                      Destroy before read
+                    </button>
+                  </>
+                )
+              ) : (
+                notefadeRevealedText ? (
+                  <>
+                    <p className={styles.notefadeRevealedText}>{notefadeRevealedText}</p>
+                    <span className={styles.notefadeRevealedLabel}>Revealed</span>
+                  </>
+                ) : (
+                  <>
+                    <p className={styles.notefadeCardBody}>
+                      Click to reveal — this note will self-destruct after reading.
+                    </p>
+                    <button
+                      type="button"
+                      className={styles.notefadeRevealBtn}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        if (msgId && onRevealNotefade) {
+                          onRevealNotefade(msgId, notefadeUrl)
+                        }
+                      }}
+                    >
+                      Reveal
+                    </button>
+                  </>
+                )
+              )}
+            </div>
+            <time className={styles.time} dateTime={new Date(timestamp).toISOString()}>
+              {time}
+            </time>
+          </>
         ) : (
           <>
             {timed && (
@@ -938,7 +1017,7 @@ export function MessageBubble({
             ref={emojiTriggerRef}
             type="button"
             className={styles.emojiTrigger}
-            onClick={() => setPickerMode(prev => prev === 'closed' ? 'compact' : 'closed')}
+            onClick={() => { setPickerMode(prev => prev === 'closed' ? 'compact' : 'closed'); setShowReactionDetail(false) }}
             aria-label="React"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -950,19 +1029,17 @@ export function MessageBubble({
           </button>
         )}
         {hasReactions && (
-          <div className={`${styles.reactionBar} ${isSelf ? styles.reactionBarSelf : styles.reactionBarPeer}`}>
+          <button
+            ref={reactionPillRef}
+            type="button"
+            className={`${styles.reactionPill} ${isSelf ? styles.reactionPillSelf : styles.reactionPillPeer}`}
+            onClick={handlePillClick}
+          >
             {grouped.map(r => (
-              <button
-                key={r.emoji}
-                type="button"
-                className={`${styles.reactionBadge} ${r.hasSelf ? styles.reactionBadgeSelf : ''}`}
-                onClick={() => handleReactionBadgeClick(r.emoji, r.hasSelf)}
-              >
-                <span className={styles.reactionEmoji}>{r.emoji}</span>
-                {r.count > 1 && <span className={styles.reactionCount}>{r.count}</span>}
-              </button>
+              <span key={r.emoji} className={styles.reactionEmoji}>{r.emoji}</span>
             ))}
-          </div>
+            <span className={styles.reactionCount}>{reactions.length}</span>
+          </button>
         )}
       </div>
       {pickerMode === 'compact' && anchorRect && (
@@ -982,6 +1059,16 @@ export function MessageBubble({
           recentEmojis={recentEmojis}
           anchorRect={anchorRect}
           alignRight={isSelf}
+        />
+      )}
+      {showReactionDetail && reactionPillRef.current && resolveReactorName && (
+        <ReactionDetail
+          reactions={reactions}
+          anchorRect={reactionPillRef.current.getBoundingClientRect()}
+          alignRight={isSelf}
+          onRemoveReaction={(emoji) => { onReact?.(emoji); setShowReactionDetail(false) }}
+          onClose={() => setShowReactionDetail(false)}
+          resolveReactorName={resolveReactorName}
         />
       )}
     </div>
