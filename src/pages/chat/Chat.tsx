@@ -18,6 +18,7 @@ import {
   useRecentEmojis,
   senderColor,
   playSendSound,
+  unlockAudio,
 } from '@/hooks';
 import type { VoiceSignal } from '@/types';
 import type {
@@ -2130,9 +2131,14 @@ function ChatView({
                   <label className={styles.settingsLabel}>Message sound</label>
                   <OnOffToggle
                     enabled={localSettings.soundEnabled}
-                    onToggle={() =>
-                      updateSetting('soundEnabled', !localSettings.soundEnabled)
-                    }
+                    onToggle={() => {
+                      const willEnable = !localSettings.soundEnabled;
+                      updateSetting('soundEnabled', willEnable);
+                      if (willEnable) {
+                        unlockAudio();
+                        playSendSound();
+                      }
+                    }}
                   />
                 </div>
               </div>
