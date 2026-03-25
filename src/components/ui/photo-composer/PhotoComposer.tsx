@@ -28,11 +28,16 @@ export function PhotoComposer({ onSend, onClose, recentEmojis = [], onTrackEmoji
   const fileInputRef = useRef<HTMLInputElement>(null)
   const captionRef = useRef<HTMLInputElement>(null)
   const emojiBtnRef = useRef<HTMLButtonElement>(null)
+  const hasAutoOpened = useRef(false)
 
   useEffect(() => {
     if (initialFiles && initialFiles.length > 0) {
-      addFiles(initialFiles)
-    } else {
+      if (!hasAutoOpened.current) {
+        hasAutoOpened.current = true
+        addFiles(initialFiles)
+      }
+    } else if (!hasAutoOpened.current) {
+      hasAutoOpened.current = true
       fileInputRef.current?.click()
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
