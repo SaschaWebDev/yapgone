@@ -7,7 +7,7 @@ import {
 } from 'react';
 import { computeWaveform } from '@/utils';
 import { createNotefadeNote, readNotefadeNote } from '@/api';
-import { generateSafeWord, encryptForNotefade, decryptFromNotefade } from '@/crypto';
+import { generateSafeWord, encryptForNotefade, decryptFromNotefade, deriveNotefadeKeyB64, BYOK_DELIMITER } from '@/crypto';
 import chatBubbleStyles from '@/components/ui/message-bubble/MessageBubble.module.css';
 import {
   useGroupChat,
@@ -779,8 +779,10 @@ function ChatView({
     async (noteText: string, mode: 'url' | 'chat') => {
       try {
         if (mode === 'url') {
-          const url = await createNotefadeNote(noteText);
-          await onSendNotefade(url);
+          const encrypted = await encryptForNotefade(noteText, roomId);
+          const keyB64 = await deriveNotefadeKeyB64(roomId);
+          const url = await createNotefadeNote(encrypted);
+          await onSendNotefade(`${url}${BYOK_DELIMITER}${keyB64}`);
         } else {
           const encrypted = await encryptForNotefade(noteText, roomId);
           const url = await createNotefadeNote(encrypted);

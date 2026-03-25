@@ -5,6 +5,17 @@ import { toBase64Url, fromBase64Url, concatBytes } from './keys'
 const SALT = new TextEncoder().encode('yapgone-notefade-salt')
 const INFO = new TextEncoder().encode('yapgone-notefade-v1')
 
+export const BYOK_DELIMITER = '!'
+
+/** Derive the room-scoped notefade key and return it as base64url (for BYOK URL suffix). */
+export async function deriveNotefadeKeyB64(roomId: string): Promise<string> {
+  const ikm = new TextEncoder().encode(roomId)
+  const keyBytes = await hkdfDerive(ikm, SALT, INFO, 32)
+  const b64 = toBase64Url(keyBytes)
+  keyBytes.fill(0)
+  return b64
+}
+
 export async function encryptForNotefade(plaintext: string, roomId: string): Promise<string> {
   const ikm = new TextEncoder().encode(roomId)
   const keyBytes = await hkdfDerive(ikm, SALT, INFO, 32)

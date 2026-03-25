@@ -60,7 +60,7 @@ const NOTEFADE_API_URL = 'https://shard-api.notefade.com/api/v1/create-note'
 const NOTEFADE_READ_API_URL = 'https://shard-api.notefade.com/api/v1/read-note'
 
 const NotefadeRequestSchema = z.object({
-  text: z.string().min(1).max(1800),
+  text: z.string().min(1).max(2500),
 })
 
 const NotefadeReadRequestSchema = z.object({
