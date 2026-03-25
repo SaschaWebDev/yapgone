@@ -1,106 +1,103 @@
-.container {
-  position: relative;
-  max-height: 50vh;
-  border: 1px solid var(--border);
+.floating {
+  position: fixed;
+  z-index: 50;
   border-radius: var(--radius-md);
   overflow: hidden;
-  background: var(--bg-secondary, rgba(var(--fg), 0.03));
-  animation: fadeIn 0.2s ease-out;
+  background: #000;
+  border: 1px solid rgba(255, 40, 40, 0.5);
+  display: flex;
+  flex-direction: column;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  animation: fadeIn 0.2s ease-out, pulseGlow 6s ease-in-out infinite;
 }
 
-.video {
+.floating:active {
+  cursor: grabbing;
+}
+
+.dragHandle {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  padding: 0 4px 0 10px;
+  background: var(--bg-elevated);
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.dragLabel {
+  flex: 1;
+  font-size: 11px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.floatingVideo {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  object-fit: contain;
+  background: #000;
   display: block;
-  width: 100%;
-  min-height: 200px;
-  max-height: 50vh;
-  object-fit: contain;
-  background: #000;
 }
 
-.fullscreenButton {
+.resizeHandle {
   position: absolute;
-  top: 8px;
-  right: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border: none;
-  border-radius: var(--radius-sm, 6px);
-  background: rgba(0, 0, 0, 0.5);
-  color: #fff;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s ease, background 0.15s ease;
+  bottom: 0;
+  right: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  touch-action: none;
 }
 
-.container:hover .fullscreenButton {
-  opacity: 1;
-}
-
-.fullscreenButton:hover {
-  background: rgba(0, 0, 0, 0.7);
-}
-
-.overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  background: #000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  animation: fadeIn 0.15s ease-out;
-}
-
-.overlayVideo {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-.closeButton {
+.resizeHandle::after {
+  content: '';
   position: absolute;
-  top: 16px;
-  right: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border: none;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.15);
-  color: #fff;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-.closeButton:hover {
-  background: rgba(255, 255, 255, 0.25);
-}
-
-.exitButton {
-  position: absolute;
-  bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
-  border: none;
-  border-radius: 20px;
-  padding: 8px 20px;
-  background: rgba(255, 255, 255, 0.15);
-  color: #fff;
-  font-size: 14px;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-.exitButton:hover {
-  background: rgba(255, 255, 255, 0.25);
+  bottom: 3px;
+  right: 3px;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid rgba(255, 255, 255, 0.3);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.3);
 }
 
 @keyframes fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+
+@keyframes pulseGlow {
+  0%, 100% {
+    box-shadow: 0 0 8px 2px rgba(255, 40, 40, 0.5),
+                0 0 20px 6px rgba(255, 40, 40, 0.25),
+                0 0 40px 12px rgba(255, 40, 40, 0.1);
+  }
+  50% {
+    box-shadow: 0 0 12px 4px rgba(255, 40, 40, 0.7),
+                0 0 28px 10px rgba(255, 40, 40, 0.4),
+                0 0 56px 20px rgba(255, 40, 40, 0.15);
+  }
+}
+
+@media (max-width: 520px) {
+  .floating {
+    left: 8px;
+    right: 8px;
+    bottom: 80px;
+    width: auto;
+    height: 200px;
+  }
+
+  .resizeHandle {
+    display: none;
+  }
+
+  .dragHandle {
+    cursor: default;
+  }
 }

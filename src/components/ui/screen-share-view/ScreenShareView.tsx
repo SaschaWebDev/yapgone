@@ -1,5 +1,6 @@
-import { useRef, useEffect, useState } from 'react'
-import { IconClose, IconFullscreen } from '../icons'
+import { useRef, useEffect } from 'react'
+import { createPortal } from 'react-dom'
+import { useDraggable } from '@/hooks/use-draggable'
 import styles from './ScreenShareView.module.css'
 
 interface ScreenShareViewProps {
@@ -8,7 +9,12 @@ interface ScreenShareViewProps {
 
 export function ScreenShareView({ stream }: ScreenShareViewProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
-  const [isFullscreen, setIsFullscreen] = useState(false)
+  const draggable = useDraggable({
+    initialWidth: 720,
+    initialHeight: 480,
+    minWidth: 240,
+    minHeight: 160,
+  })
 
   useEffect(() => {
     const video = videoRef.current
@@ -19,56 +25,27 @@ export function ScreenShareView({ stream }: ScreenShareViewProps) {
     }
   }, [stream])
 
-  useEffect(() => {
-    if (!isFullscreen) return
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setIsFullscreen(false)
-    }
-    document.addEventListener('keydown', handleKey)
-    return () => document.removeEventListener('keydown', handleKey)
-  }, [isFullscreen])
-
-  if (isFullscreen) {
-    return (
-      <div className={styles.overlay}>
-        <video
-          ref={videoRef}
-          className={styles.overlayVideo}
-          autoPlay
-          playsInline
-        />
-        <button
-          className={styles.closeButton}
-          onClick={() => setIsFullscreen(false)}
-          aria-label="Exit fullscreen"
-        >
-          <IconClose size={24} />
-        </button>
-        <button
-          className={styles.exitButton}
-          onClick={() => setIsFullscreen(false)}
-        >
-          Exit fullscreen
-        </button>
+  return createPortal(
+    <div
+      className={styles.floating}
+      style={draggable.style}
+      onPointerDown={draggable.onDragStart}
+      onDoubleClick={draggable.onDoubleClick}
+    >
+      <div className={styles.dragHandle}>
+        <span className={styles.dragLabel}>Screen Share</span>
       </div>
-    )
-  }
-
-  return (
-    <div className={styles.container}>
       <video
         ref={videoRef}
-        className={styles.video}
+        className={styles.floatingVideo}
         autoPlay
         playsInline
       />
-      <button
-        className={styles.fullscreenButton}
-        onClick={() => setIsFullscreen(true)}
-        aria-label="Enter fullscreen"
-      >
-        <IconFullscreen size={18} />
-      </button>
-    </div>
+      <div
+        className={styles.resizeHandle}
+        onPointerDown={draggable.onResizeStart}
+      />
+    </div>,
+    document.body,
   )
 }
