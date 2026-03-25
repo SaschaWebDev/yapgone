@@ -397,7 +397,7 @@ That's it. No message logs, no key material, no user profiles.
 | `PATCH` | `/api/rooms/:id/config` | Update room config (max participants). |
 | `POST` | `/api/rooms/:id/shard` | Store an XOR share for invite splitting. Body: `{ shard }`. |
 | `GET` | `/api/rooms/:id/shard` | Fetch and delete a shard (one-time read). Returns `{ shard }`. |
-| `POST` | `/api/notefade/create-note` | Proxy to notefade API. Body: `{ text }`. Returns `{ url }`. |
+| `POST` | `/api/notefade/create-note` | Proxy to notefade API. Body: `{ text }` (plaintext or BYOK-encrypted, max 8000 chars). Returns `{ url }`. |
 | `POST` | `/api/notefade/read-note` | Proxy to notefade read API. Body: `{ url }`. Returns `{ text }`. |
 
 Six REST endpoints. That's the entire backend.
