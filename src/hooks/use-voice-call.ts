@@ -295,6 +295,24 @@ export function useVoiceCall({
       }
     }
 
+    if (track.kind === 'video') {
+      const transceiver = pc.getTransceivers().find(t => t.sender === sender)
+      if (transceiver && typeof transceiver.setCodecPreferences === 'function') {
+        const capabilities = RTCRtpReceiver.getCapabilities('video')
+        if (capabilities) {
+          const vp8Codecs = capabilities.codecs.filter(
+            c => c.mimeType.toLowerCase() === 'video/vp8',
+          )
+          const otherCodecs = capabilities.codecs.filter(
+            c => c.mimeType.toLowerCase() !== 'video/vp8',
+          )
+          if (vp8Codecs.length > 0) {
+            transceiver.setCodecPreferences([...vp8Codecs, ...otherCodecs])
+          }
+        }
+      }
+    }
+
     return sender
   }, [attachTransform])
 
@@ -592,7 +610,9 @@ export function useVoiceCall({
     if (!pc || stateRef.current !== 'active') return
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
+        video: {
+          frameRate: { ideal: 5, max: 15 },
+        },
         audio: false,
       })
       screenStreamRef.current = stream
@@ -601,11 +621,22 @@ export function useVoiceCall({
         stream.getTracks().forEach(t => t.stop())
         return
       }
+      videoTrack.contentHint = 'detail'
       videoTrack.onended = () => {
         stopScreenShare()
       }
       const sender = addTrackWithTransform(pc, videoTrack, stream)
       screenSenderRef.current = sender
+      try {
+        const params = sender.getParameters()
+        if (!params.encodings) params.encodings = [{}]
+        const encoding = params.encodings[0]
+        if (encoding) {
+          encoding.maxBitrate = 2_500_000
+          encoding.maxFramerate = 15
+        }
+        await sender.setParameters(params)
+      } catch { /* non-fatal */ }
       // Renegotiate SDP after adding track
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
