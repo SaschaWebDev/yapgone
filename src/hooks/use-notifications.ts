@@ -2,9 +2,28 @@ import { useEffect, useRef } from 'react'
 import type { ChatMessage } from './use-chat'
 import { DEFAULT_TITLE } from '@/constants'
 
+let audioCtx: AudioContext | null = null
+
+function getAudioContext(): AudioContext {
+  if (!audioCtx || audioCtx.state === 'closed') {
+    audioCtx = new AudioContext()
+  }
+  return audioCtx
+}
+
+export function unlockAudio(): void {
+  try {
+    const ctx = getAudioContext()
+    void ctx.resume()
+  } catch {
+    // Web Audio unavailable — silently skip
+  }
+}
+
 function playTone(frequency: number, duration: number, volume: number) {
   try {
-    const ctx = new AudioContext()
+    const ctx = getAudioContext()
+    void ctx.resume()
     const osc = ctx.createOscillator()
     const gain = ctx.createGain()
     osc.connect(gain)
@@ -15,7 +34,6 @@ function playTone(frequency: number, duration: number, volume: number) {
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration)
     osc.start(ctx.currentTime)
     osc.stop(ctx.currentTime + duration)
-    osc.onended = () => ctx.close()
   } catch {
     // Web Audio unavailable — silently skip
   }

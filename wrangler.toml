@@ -9,7 +9,7 @@ bindings = [
 
 [[kv_namespaces]]
 binding = "INVITE_SHARDS"
-id = "PLACEHOLDER_KV_ID"
+id = "be0871cf191c4fa3b32828ee22c7eb9a"
 
 [[migrations]]
 tag = "v1"
