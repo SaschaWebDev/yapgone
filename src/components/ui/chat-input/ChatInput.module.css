@@ -9,7 +9,6 @@
   align-items: flex-end;
   gap: 0.5rem;
   padding: 0.75rem 0;
-  border-top: 1px solid var(--border);
 }
 
 .input {
@@ -76,7 +75,9 @@
   border-radius: var(--radius-md);
   flex-shrink: 0;
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
 }
 
 .micButton:hover {
@@ -106,8 +107,13 @@
 }
 
 @keyframes recordingPulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
 }
 
 .recordingTimer {
@@ -128,7 +134,9 @@
   border-radius: var(--radius-md);
   flex-shrink: 0;
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
 }
 
 .cancelButton:hover {
@@ -180,7 +188,9 @@
   border-radius: var(--radius-md);
   flex-shrink: 0;
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
 }
 
 .pauseButton:hover {
@@ -274,8 +284,13 @@
   transition: opacity 0.15s;
 }
 
-.splitButtonLeft:hover:not(:disabled) { opacity: 0.85; }
-.splitButtonLeft:disabled { opacity: 0.4; cursor: not-allowed; }
+.splitButtonLeft:hover:not(:disabled) {
+  opacity: 0.85;
+}
+.splitButtonLeft:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 
 .splitDivider {
   width: 1px;
@@ -295,8 +310,13 @@
   transition: opacity 0.15s;
 }
 
-.splitButtonRight:hover:not(:disabled) { opacity: 0.85; }
-.splitButtonRight:disabled { opacity: 0.4; cursor: not-allowed; }
+.splitButtonRight:hover:not(:disabled) {
+  opacity: 0.85;
+}
+.splitButtonRight:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 
 .hiddenFileInput {
   display: none;
@@ -314,7 +334,9 @@
   border-radius: var(--radius-md);
   flex-shrink: 0;
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
 }
 
 .attachButton:hover:not(:disabled) {
@@ -339,7 +361,9 @@
   border-radius: var(--radius-md);
   flex-shrink: 0;
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
 }
 
 .emojiButton:hover:not(:disabled) {
@@ -351,4 +375,3 @@
   opacity: 0.4;
   cursor: not-allowed;
 }
-

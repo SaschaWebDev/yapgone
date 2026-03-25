@@ -619,6 +619,11 @@ export function useGroupChat(
         transferProgress: undefined,
       } : m
     ))
+    if (assembly.mimeType.startsWith('audio/')) {
+      void computeWaveform(blob).then(w => {
+        setMessages(prev => prev.map(m => m.id === payload.fileId ? { ...m, waveform: w } : m))
+      })
+    }
     fileAssembliesRef.current.delete(payload.fileId)
   }, [cleanupFileAssemblies, trackFileUrl, getPeerDisplayName])
 
@@ -1553,6 +1558,11 @@ export function useGroupChat(
     setMessages(prev => prev.map(m =>
       m.id === fileId ? { ...m, transferProgress: undefined } : m
     ))
+    if (file.type.startsWith('audio/')) {
+      void computeWaveform(file).then(w => {
+        setMessages(prev => prev.map(m => m.id === fileId ? { ...m, waveform: w } : m))
+      })
+    }
   }, [encryptAndSend, trackFileUrl])
 
   const sendPoll = useCallback(async (
