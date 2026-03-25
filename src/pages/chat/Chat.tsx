@@ -17,6 +17,7 @@ import {
   useInactivityTimer,
   useRecentEmojis,
   senderColor,
+  playSendSound,
 } from '@/hooks';
 import type { VoiceSignal } from '@/types';
 import type {
@@ -729,16 +730,18 @@ function ChatView({
     (text: string) => {
       onSend(text, replyingTo?.id);
       setReplyingTo(null);
+      if (localSettings.soundEnabled) playSendSound();
     },
-    [onSend, replyingTo],
+    [onSend, replyingTo, localSettings.soundEnabled],
   );
 
   const handleSendTimed = useCallback(
     (text: string) => {
       onSend(text, replyingTo?.id, true);
       setReplyingTo(null);
+      if (localSettings.soundEnabled) playSendSound();
     },
-    [onSend, replyingTo],
+    [onSend, replyingTo, localSettings.soundEnabled],
   );
 
   const handleSendPoll = useCallback(
@@ -750,8 +753,9 @@ function ChatView({
     ) => {
       await onSendPoll(question, questionEmoji, options, allowMultiple);
       setPollCreatorOpen(false);
+      if (localSettings.soundEnabled) playSendSound();
     },
-    [onSendPoll],
+    [onSendPoll, localSettings.soundEnabled],
   );
 
   const handleSendGallery = useCallback(
@@ -759,8 +763,9 @@ function ChatView({
       await onSendGallery(files, caption, timed);
       setPhotoComposerOpen(false);
       setCameraFile(null);
+      if (localSettings.soundEnabled) playSendSound();
     },
-    [onSendGallery],
+    [onSendGallery, localSettings.soundEnabled],
   );
 
   const handleCameraCapture = useCallback((file: File) => {
@@ -839,9 +844,11 @@ function ChatView({
         setFileError(`File too large (max ${limitMB} MB)`);
         return;
       }
-      onSendFile(file).catch(() => setFileError('Failed to send file'));
+      onSendFile(file)
+        .then(() => { if (localSettings.soundEnabled) playSendSound(); })
+        .catch(() => setFileError('Failed to send file'));
     },
-    [onSendFile],
+    [onSendFile, localSettings.soundEnabled],
   );
 
   const handleGalleryImageClick = useCallback(
@@ -1147,7 +1154,10 @@ function ChatView({
 
         setIsSendingVoiceNote(true);
         onSendVoiceNote(blob, durationMs, mimeType, wasTimed || undefined)
-          .then(() => setVoiceNoteError(null))
+          .then(() => {
+            setVoiceNoteError(null);
+            if (localSettings.soundEnabled) playSendSound();
+          })
           .catch(() => setVoiceNoteError('Failed to send voice note'))
           .finally(() => setIsSendingVoiceNote(false));
       };

@@ -2,23 +2,31 @@ import { useEffect, useRef } from 'react'
 import type { ChatMessage } from './use-chat'
 import { DEFAULT_TITLE } from '@/constants'
 
-function playBlip() {
+function playTone(frequency: number, duration: number, volume: number) {
   try {
     const ctx = new AudioContext()
     const osc = ctx.createOscillator()
     const gain = ctx.createGain()
     osc.connect(gain)
     gain.connect(ctx.destination)
-    osc.frequency.value = 880
+    osc.frequency.value = frequency
     osc.type = 'sine'
-    gain.gain.setValueAtTime(0.15, ctx.currentTime)
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05)
+    gain.gain.setValueAtTime(volume, ctx.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration)
     osc.start(ctx.currentTime)
-    osc.stop(ctx.currentTime + 0.05)
+    osc.stop(ctx.currentTime + duration)
     osc.onended = () => ctx.close()
   } catch {
     // Web Audio unavailable — silently skip
   }
+}
+
+export function playSendSound() {
+  playTone(880, 0.05, 0.15)
+}
+
+function playReceiveSound() {
+  playTone(660, 0.07, 0.12)
 }
 
 export function useNotifications(
@@ -38,14 +46,17 @@ export function useNotifications(
 
     const peerMessages = newMessages.filter((m) => m.sender === 'peer')
     if (peerMessages.length === 0) return
+
+    // Sound plays regardless of tab visibility
+    if (soundEnabled) {
+      playReceiveSound()
+    }
+
+    // Title badge + browser notification only when tab is hidden
     if (!document.hidden) return
 
     hiddenCountRef.current += peerMessages.length
     document.title = `(${hiddenCountRef.current}) ${DEFAULT_TITLE}`
-
-    if (!soundEnabled) return
-
-    playBlip()
 
     if (Notification.permission === 'default') {
       void Notification.requestPermission()
