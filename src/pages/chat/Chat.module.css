@@ -156,6 +156,26 @@
   color: rgba(var(--fg), 0.6);
 }
 
+.shareIcon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: var(--radius-sm);
+  background: rgba(var(--fg), 0.06);
+  border: 1px solid rgba(var(--fg), 0.08);
+  color: rgba(var(--fg), 0.4);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.shareIcon:hover {
+  background: rgba(var(--fg), 0.1);
+  color: rgba(var(--fg), 0.6);
+}
+
 .endMessage {
   color: var(--text-secondary);
   font-size: 1rem;
@@ -811,6 +831,7 @@
   font-variant-numeric: tabular-nums;
   line-height: 1;
   color: #fff;
+  padding-bottom: 1px;
 }
 
 .participantSlider {
