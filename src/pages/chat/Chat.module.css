@@ -197,7 +197,6 @@
   align-items: center;
   justify-content: space-between;
   padding-bottom: 0.75rem;
-  border-bottom: 1px solid var(--border);
 }
 
 .headerLeft {
@@ -229,15 +228,23 @@
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 0.75rem 0;
-  padding-right: 6rem;
+  padding: 0.75rem 3rem;
   min-height: 0;
+  background: url('/yapgone-chat-background.png') repeat center / 768px;
+  background-attachment: local;
+  border-radius: 30px;
+  border: 1px solid #201f1f;
 }
 
 @media (max-width: 520px) {
   .messageList {
-    padding-right: 1.5rem;
+    padding: 0.75rem 1.5rem;
   }
+}
+
+[data-theme='light'] .messageList {
+  background-image: url('/yapgone-chat-background-light.png');
+  border-color: #e0e0e0;
 }
 
 .typingIndicator {
@@ -289,6 +296,7 @@
     color 0.15s ease,
     background 0.15s ease,
     border-color 0.15s ease;
+  margin-left: 30%;
 }
 
 .gearButton:hover {
@@ -556,7 +564,9 @@
   background: rgba(var(--fg), 0.04);
   border: 1px solid rgba(var(--fg), 0.08);
   cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
 }
 
 .securityBox:hover {
@@ -592,7 +602,9 @@
 .shieldActive svg {
   fill: rgba(var(--success-rgb), 0.45);
   filter: drop-shadow(0 0 3px rgba(var(--success-rgb), 0.2));
-  transition: fill 0.15s ease, filter 0.15s ease;
+  transition:
+    fill 0.15s ease,
+    filter 0.15s ease;
 }
 
 .securityBox:hover .shieldActive svg {
@@ -809,6 +821,7 @@
   border-radius: 2px;
   background: rgba(var(--fg), 0.1);
   outline: none;
+  max-width: 300px;
 }
 
 .participantSlider::-webkit-slider-thumb {
@@ -860,7 +873,9 @@
 }
 
 .safeWordInputWrapperApplied {
-  animation: settingsFadeIn 0.2s ease-out, safeWordPulse 0.6s ease-out;
+  animation:
+    settingsFadeIn 0.2s ease-out,
+    safeWordPulse 0.6s ease-out;
 }
 
 @keyframes safeWordPulse {
@@ -984,7 +999,10 @@
   border-radius: var(--radius-sm);
   color: var(--success);
   cursor: pointer;
-  transition: color 0.15s, background 0.15s, border-color 0.15s;
+  transition:
+    color 0.15s,
+    background 0.15s,
+    border-color 0.15s;
 }
 
 .voiceCallBadge:hover {
