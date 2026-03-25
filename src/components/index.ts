@@ -1,5 +1,5 @@
 export { Layout } from './layout'
 export { ErrorBoundary } from './error-boundary'
 export type { IconProps } from './ui'
-export { IconSend, IconCopy, IconCheck, IconLock, IconLink, IconPhone, IconMic, IconMicOff, IconGear, IconQr, IconScreenShare, IconScreenShareOff, IconPerson } from './ui'
+export { IconSend, IconCopy, IconCheck, IconLock, IconLink, IconPhone, IconMic, IconMicOff, IconGear, IconQr, IconScreenShare, IconScreenShareOff, IconPerson, IconShare } from './ui'
 export { Button, MessageBubble, ChatInput, CopyButton, StatusBadge, VoiceControls, OnOffToggle, QrModal, QrCode, EmojiQuickPick, ReplyPreview, InactivityCountdown, ScreenShareView, ImageLightbox, AttachmentMenu, PollCreator, PhotoComposer, NotefadeComposer, SafetyNumber, ParticipantList, ReactionDetail } from './ui'

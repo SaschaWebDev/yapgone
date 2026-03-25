@@ -45,6 +45,7 @@ import {
   IconGear,
   IconPerson,
   IconPhone,
+  IconShare,
   OnOffToggle,
   QrCode,
   ReplyPreview,
@@ -1518,6 +1519,19 @@ function ChatView({
                           <IconCopy size={16} />
                         )}
                       </button>
+                      {typeof navigator.share === 'function' && (
+                        <button
+                          type='button'
+                          className={styles.shareIcon}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigator.share({ title: 'yapgone', url: inviteUrl }).catch(() => {});
+                          }}
+                          title='share link'
+                        >
+                          <IconShare size={16} />
+                        </button>
+                      )}
                       {copied && (
                         <span
                           className={`${styles.copiedHint} ${copyState === 'fading' ? styles.copiedHintFading : ''}`}
