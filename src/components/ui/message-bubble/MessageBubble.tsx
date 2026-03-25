@@ -791,6 +791,31 @@ export function MessageBubble({
               </time>
             </div>
           </div>
+        ) : kind === 'file' && fileMimeType?.startsWith('audio/') && fileUrl && transferProgress === undefined ? (
+          <div className={styles.audioFileCard}>
+            {timed && (
+              <span className={styles.timedBadge}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <polyline points="12 6 12 12 16 14" />
+                </svg>
+                timed
+              </span>
+            )}
+            <AudioPlayer
+              src={fileUrl}
+              waveform={waveform}
+              isSelf={isSelf}
+              timestamp={timestamp}
+              timed={timed}
+              onPlayOnceComplete={timed && !isSelf ? handleAudioPlayOnceComplete : undefined}
+              onAudioEnded={handleAudioEnded}
+            />
+            <div className={styles.audioFileMeta}>
+              <span className={styles.audioFileName}>{fileName}</span>
+              {fileSize ? <span className={styles.audioFileSize}>{formatFileSize(fileSize)}</span> : null}
+            </div>
+          </div>
         ) : kind === 'file' ? (
           <div className={styles.fileCard}>
             {timed && (

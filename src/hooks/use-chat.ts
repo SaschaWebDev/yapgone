@@ -958,6 +958,11 @@ export function useChatAsCreator(
         transferProgress: undefined,
       } : m
     ))
+    if (assembly.mimeType.startsWith('audio/')) {
+      void computeWaveform(blob).then(w => {
+        setMessages(prev => prev.map(m => m.id === payload.fileId ? { ...m, waveform: w } : m))
+      })
+    }
     fileAssembliesRef.current.delete(payload.fileId)
   }, [cleanupFileAssemblies, trackFileUrl])
 
@@ -1563,6 +1568,11 @@ export function useChatAsCreator(
     setMessages(prev => prev.map(m =>
       m.id === fileId ? { ...m, transferProgress: undefined } : m
     ))
+    if (file.type.startsWith('audio/')) {
+      void computeWaveform(file).then(w => {
+        setMessages(prev => prev.map(m => m.id === fileId ? { ...m, waveform: w } : m))
+      })
+    }
   }, [trackFileUrl])
 
   const sendTimedConsumed = useCallback(async (noteId: string) => {
@@ -2154,6 +2164,11 @@ export function useChatAsJoiner(
         transferProgress: undefined,
       } : m
     ))
+    if (assembly.mimeType.startsWith('audio/')) {
+      void computeWaveform(fileBlob).then(w => {
+        setMessages(prev => prev.map(m => m.id === payload.fileId ? { ...m, waveform: w } : m))
+      })
+    }
     fileAssembliesRef.current.delete(payload.fileId)
   }, [cleanupFileAssemblies, trackFileUrl])
 
@@ -2743,6 +2758,11 @@ export function useChatAsJoiner(
     setMessages(prev => prev.map(m =>
       m.id === fileId ? { ...m, transferProgress: undefined } : m
     ))
+    if (file.type.startsWith('audio/')) {
+      void computeWaveform(file).then(w => {
+        setMessages(prev => prev.map(m => m.id === fileId ? { ...m, waveform: w } : m))
+      })
+    }
   }, [trackFileUrl])
 
   const sendTimedConsumed = useCallback(async (noteId: string) => {
