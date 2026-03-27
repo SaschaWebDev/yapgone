@@ -271,8 +271,15 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 0.5rem 0.85rem;
+  padding: 0.45rem 0.75rem;
   align-self: flex-start;
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  border-bottom-left-radius: var(--radius-sm);
+}
+
+[data-theme='light'] .typingIndicator {
+  background: #e2e2e4;
 }
 
 .typingDot {
