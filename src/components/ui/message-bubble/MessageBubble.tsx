@@ -1063,7 +1063,7 @@ export function MessageBubble({
             {grouped.map(r => (
               <span key={r.emoji} className={styles.reactionEmoji}>{r.emoji}</span>
             ))}
-            <span className={styles.reactionCount}>{reactions.length}</span>
+            {reactions.length > 1 && <span className={styles.reactionCount}>{reactions.length}</span>}
           </button>
         )}
       </div>
