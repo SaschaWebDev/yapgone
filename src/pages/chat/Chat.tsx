@@ -968,6 +968,14 @@ function ChatView({
     }
   }, [messages.length, messages, localSettings.autoScroll]);
 
+  // Scroll when typing indicator appears
+  useEffect(() => {
+    if (!peerTyping) return;
+    if (localSettings.autoScroll || isAtBottomRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [peerTyping, localSettings.autoScroll]);
+
   const handleMessageListScroll = useCallback(() => {
     const el = messageListRef.current;
     if (!el) return;
@@ -1874,7 +1882,9 @@ function ChatView({
               onCopy={
                 msg.kind === 'text' && msg.text
                   ? () => handleCopyMessage(msg.text ?? '')
-                  : undefined
+                  : msg.kind === 'notefade-chat' && revealedNotes.get(msg.id)
+                    ? () => handleCopyMessage(revealedNotes.get(msg.id) ?? '')
+                    : undefined
               }
               onDownload={
                 (msg.kind === 'audio' && msg.audioUrl) ||
@@ -2037,11 +2047,13 @@ function ChatView({
                 />
               )}
             </span>
-            <StatusBadge
-              phase={isReady ? 'ready' : 'peer-disconnected'}
-              connectionQuality={connectionQuality}
-              hideDot
-            />
+            <span className={styles.securityBadgeLabel}>
+              <StatusBadge
+                phase={isReady ? 'ready' : 'peer-disconnected'}
+                connectionQuality={connectionQuality}
+                hideDot
+              />
+            </span>
           </div>
           {participantCount > 1 && (
             <button
@@ -2065,12 +2077,13 @@ function ChatView({
               aria-label='Start voice call'
             >
               <IconPhone size={20} />
+              <span className={styles.voiceCallLabel}>Voice call</span>
             </button>
           )}
         </div>
         <div className={styles.headerActions}>
           {showEndConfirm ? (
-            <div className={styles.confirmBar}>
+            <div className={styles.confirmBarInline}>
               <span className={styles.confirmText}>
                 {participantCount > 2 ? 'Leave this chat?' : 'Leave chat?'}
               </span>
@@ -2148,6 +2161,36 @@ function ChatView({
           </div>
         </div>
       </div>
+      {showEndConfirm && (
+        <div className={styles.confirmBarMobile}>
+          <span className={styles.confirmText}>
+            {participantCount > 2 ? 'Leave this chat?' : 'Leave chat?'}
+          </span>
+          {participantCount > 2 && (
+            <Button
+              intent='destructive'
+              onClick={() => {
+                setShowEndConfirm(false);
+                onEnd();
+              }}
+            >
+              Leave
+            </Button>
+          )}
+          <Button
+            intent='destructive'
+            onClick={() => {
+              setShowEndConfirm(false);
+              onEndForAll();
+            }}
+          >
+            {participantCount > 2 ? 'Close room' : 'Leave'}
+          </Button>
+          <Button intent='neutral' onClick={() => setShowEndConfirm(false)}>
+            Cancel
+          </Button>
+        </div>
+      )}
       {isPeerDisconnected && (
         <div className={styles.reconnectingIndicator}>
           Partner disconnected, waiting for reconnection...
@@ -2261,7 +2304,9 @@ function ChatView({
             onCopy={
               msg.kind === 'text' && msg.text && !msg.timed
                 ? () => handleCopyMessage(msg.text ?? '')
-                : undefined
+                : msg.kind === 'notefade-chat' && revealedNotes.get(msg.id)
+                  ? () => handleCopyMessage(revealedNotes.get(msg.id) ?? '')
+                  : undefined
             }
             onDownload={
               (msg.kind === 'audio' &&

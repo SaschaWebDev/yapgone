@@ -16,7 +16,7 @@ export function Layout({ children }: LayoutProps) {
         <div className={styles.headerLeft}>
           <a href='/' className={styles.logo}>
             <img src='/yapgone-logo.png' alt='' className={styles.logoIcon} />
-            yapgone
+            <span className={styles.logoTitle}>yapgone</span>
           </a>
           <span className={styles.tagline}>
             encrypted yapping, gone for good

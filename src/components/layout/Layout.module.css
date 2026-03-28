@@ -31,6 +31,11 @@
   color: var(--text-primary);
   text-decoration: none;
   letter-spacing: -0.02em;
+  margin-bottom: -8px;
+}
+
+.logoTitle {
+  padding-bottom: 8px;
 }
 
 .logoIcon {
@@ -45,6 +50,10 @@
 
 @media (max-width: 480px) {
   .logoIcon {
+    display: none;
+  }
+
+  .tagline {
     display: none;
   }
 }
@@ -74,7 +83,9 @@
   padding: 0.35rem 0;
   font-size: 1rem;
   line-height: 1;
-  transition: color 0.15s, border-color 0.15s;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
 }
 
 .themeToggle:hover {
@@ -88,4 +99,18 @@
   flex-direction: column;
   padding: 2rem 0;
   min-height: 0;
+}
+
+@media (max-width: 520px) {
+  .header {
+    padding: 0.5rem 0;
+  }
+
+  .main {
+    padding: 0;
+  }
+
+  .logoTitle {
+    margin-top: -10px;
+  }
 }

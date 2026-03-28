@@ -6,6 +6,12 @@
   min-width: 37%;
 }
 
+@media (max-width: 520px) {
+  .bubbleWrapper {
+    max-width: 75%;
+  }
+}
+
 .bubbleWrapperSelf {
   align-self: flex-end;
 }
@@ -34,6 +40,20 @@
 
 .bubbleWrapperEmoji.bubbleWrapperPeer {
   margin-left: 200px;
+}
+
+@media (max-width: 520px) {
+  .bubbleWrapperEmoji {
+    max-width: none;
+  }
+
+  .bubbleWrapperEmoji.bubbleWrapperSelf {
+    margin-right: 2px;
+  }
+
+  .bubbleWrapperEmoji.bubbleWrapperPeer {
+    margin-left: 2px;
+  }
 }
 
 .bubble {
@@ -67,6 +87,31 @@
   font-size: 0.925rem;
   line-height: 1.5;
   white-space: pre-wrap;
+}
+
+.textCollapsible {
+  max-height: 16.65rem; /* 12 lines: 12 × 1.5 × 0.925rem */
+  overflow: hidden;
+}
+
+@media (max-width: 520px) {
+  .textCollapsible {
+    max-height: 13.875rem;
+  }
+}
+
+.readMore {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 0.15rem 0 0;
+  opacity: 0.7;
+}
+
+.readMore:hover {
+  opacity: 1;
 }
 
 .emojiOnly {
@@ -238,7 +283,9 @@
   border-radius: 999px;
   cursor: pointer;
   z-index: 1;
-  transition: border-color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
   line-height: 1;
 }
 
@@ -738,8 +785,14 @@
 }
 
 @keyframes timedFadeOut {
-  from { opacity: 1; transform: scale(1); }
-  to { opacity: 0; transform: scale(0.95); }
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.95);
+  }
 }
 
 .timedFadingOut {
@@ -761,16 +814,36 @@
   display: none;
 }
 
-
 /* Image message styles */
 .bubbleWrapperImage {
   min-width: 12rem;
   max-width: 50%;
 }
 
+@media (max-width: 520px) {
+  .bubbleWrapperImage {
+    min-width: 0;
+    max-width: 75%;
+    width: 75%;
+    overflow: hidden;
+  }
+
+  .imageContent {
+    width: 100%;
+    max-width: 100%;
+  }
+}
+
 .bubbleWrapperFile {
   min-width: 14rem;
   max-width: 50%;
+}
+
+@media (max-width: 520px) {
+  .bubbleWrapperFile {
+    min-width: 0;
+    max-width: 75%;
+  }
 }
 
 .imageContainer {
@@ -1064,6 +1137,13 @@
   max-width: 50%;
 }
 
+@media (max-width: 520px) {
+  .bubbleWrapperNotefade {
+    min-width: 0;
+    max-width: 75%;
+  }
+}
+
 .notefadeCard {
   display: flex;
   flex-direction: column;
@@ -1198,11 +1278,17 @@
   margin-top: 0.125rem;
 }
 
-
 /* Gallery styles */
 .bubbleWrapperGallery {
   min-width: 16rem;
   max-width: 70%;
+}
+
+@media (max-width: 520px) {
+  .bubbleWrapperGallery {
+    min-width: 0;
+    max-width: 75%;
+  }
 }
 
 .galleryContent {
@@ -1256,7 +1342,7 @@
   grid-template-columns: 1fr 1fr;
 }
 
-.galleryGrid5 .galleryTile:nth-child(n+3) {
+.galleryGrid5 .galleryTile:nth-child(n + 3) {
   /* last 3 images: use 3 columns for bottom row */
 }
 
@@ -1332,10 +1418,10 @@
 }
 
 /* Light mode: darken peer bubbles for contrast against light background */
-[data-theme="light"] .peer {
+[data-theme='light'] .peer {
   background: #e2e2e4;
 }
 
-[data-theme="light"] .emojiOnlyTimePillPeer {
+[data-theme='light'] .emojiOnlyTimePillPeer {
   background: #e2e2e4;
 }

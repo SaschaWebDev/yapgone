@@ -57,7 +57,7 @@ export function SafetyNumber({ myPubKeyRaw, peerPubKeys, onClose }: SafetyNumber
   return createPortal(
     <div className={styles.overlay} onClick={handleBackdropClick}>
       <div className={styles.modal}>
-        <span className={styles.verifyLabel}>Verify</span>
+        <span className={styles.verifyLabel}>Encrypted</span>
         <h3 className={styles.heading}>Verify Security</h3>
 
         {digits === null ? (

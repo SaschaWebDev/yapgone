@@ -555,6 +555,9 @@ export function MessageBubble({
   const [compact, setCompact] = useState(false)
   const [timedTimerProgress, setTimedTimerProgress] = useState(0)
   const [fadingOut, setFadingOut] = useState(false)
+  const [textExpanded, setTextExpanded] = useState(false)
+  const [textClamped, setTextClamped] = useState(false)
+  const textRef = useRef<HTMLParagraphElement>(null)
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const longPressRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const timedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -682,6 +685,12 @@ export function MessageBubble({
     observer.observe(el)
     return () => observer.disconnect()
   }, [])
+
+  useEffect(() => {
+    const el = textRef.current
+    if (!el || kind !== 'text') return
+    setTextClamped(el.scrollHeight > el.clientHeight)
+  }, [text, kind])
 
   const handleEmojiSelect = useCallback((emoji: string) => {
     setPickerMode('closed')
@@ -970,7 +979,19 @@ export function MessageBubble({
                 timed
               </span>
             )}
-            <p className={`${styles.text}${emojiOnly ? ` ${styles.emojiOnly}` : ''}`}>{text ? formatMessage(text) : ''}</p>
+            <p
+              ref={kind === 'text' && !emojiOnly ? textRef : undefined}
+              className={`${styles.text}${emojiOnly ? ` ${styles.emojiOnly}` : ''}${kind === 'text' && !emojiOnly && !textExpanded ? ` ${styles.textCollapsible}` : ''}`}
+            >{text ? formatMessage(text) : ''}</p>
+            {textClamped && !textExpanded && (
+              <button
+                type="button"
+                className={styles.readMore}
+                onClick={(e) => { e.stopPropagation(); setTextExpanded(true) }}
+              >
+                Read more
+              </button>
+            )}
             {emojiOnly ? (
               <span className={`${styles.emojiOnlyTimePill} ${isSelf ? styles.emojiOnlyTimePillSelf : styles.emojiOnlyTimePillPeer}`}>
                 <time className={styles.time} dateTime={new Date(timestamp).toISOString()}>
@@ -992,7 +1013,7 @@ export function MessageBubble({
             />
           </div>
         )}
-        {onCopy && kind === 'text' && !emojiOnly && (
+        {onCopy && (kind === 'text' || (kind === 'notefade-chat' && notefadeRevealedText)) && !emojiOnly && (
           <button
             type="button"
             className={`${styles.copyButton} ${copyDone ? styles.copyDone : ''}`}
