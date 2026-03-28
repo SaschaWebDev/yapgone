@@ -1,6 +1,6 @@
 :root {
   --fg: 255, 255, 255;
-  --accent-rgb: 99, 102, 241;
+  --accent-rgb: 70, 106, 252;
   --success-rgb: 34, 197, 94;
   --warning-rgb: 234, 179, 8;
   --error-rgb: 239, 68, 68;
@@ -18,7 +18,7 @@
   --text-tertiary: rgba(var(--fg), 0.3);
 
   --accent: rgb(var(--accent-rgb));
-  --accent-hover: rgb(129, 132, 255);
+  --accent-hover: rgb(100, 136, 255);
   --success: rgb(var(--success-rgb));
   --warning: rgb(var(--warning-rgb));
   --error: rgb(var(--error-rgb));
@@ -46,7 +46,7 @@
   --bg-overlay: rgba(0, 0, 0, 0.4);
   --bg-code: #f0f0f0;
 
-  --accent-hover: rgb(79, 82, 220);
+  --accent-hover: rgb(50, 86, 220);
 
   --border: rgba(var(--fg), 0.12);
 }
