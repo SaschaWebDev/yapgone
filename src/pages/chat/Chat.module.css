@@ -281,17 +281,43 @@
   font-size: 0.8rem;
 }
 
+.confirmDescription {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  margin: 0 0 0.5rem;
+  text-align: center;
+  flex-basis: 100%;
+}
+
 @media (max-width: 520px) {
   .confirmBarInline {
     display: none;
   }
 
   .confirmBarMobile {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 2000;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 1.25rem;
+    width: calc(100% - 2rem);
+    max-width: 22rem;
+    box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.45);
     display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
     align-items: center;
-    justify-content: center;
-    gap: 0.4rem;
-    padding: 0.4rem 0;
+    gap: 0.75rem;
+  }
+
+  .confirmBarMobile .confirmText {
+    flex-basis: 100%;
+    text-align: center;
   }
 }
 
@@ -1159,4 +1185,32 @@
   display: flex;
   gap: 0.4rem;
   justify-content: flex-end;
+}
+
+@media (max-width: 520px) {
+  .voicePrivacyBanner {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 2000;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 1.25rem;
+    width: calc(100% - 2rem);
+    max-width: 22rem;
+    box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.45);
+    gap: 0.75rem;
+  }
+
+  .voicePrivacyText {
+    font-size: 0.75rem;
+    line-height: 1.4;
+    text-align: center;
+  }
+
+  .voicePrivacyActions {
+    justify-content: center;
+  }
 }
