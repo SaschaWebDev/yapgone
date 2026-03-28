@@ -21,6 +21,7 @@
   flex-direction: column;
   gap: 0.85rem;
   animation: scaleIn 0.15s ease-out;
+  overflow: hidden;
 }
 
 .heading {
@@ -57,6 +58,7 @@
 
 .input {
   flex: 1;
+  min-width: 0;
   background: var(--bg-card);
   color: var(--text-primary);
   border: 1px solid var(--border);
@@ -125,6 +127,7 @@
 
 .optionInput {
   flex: 1;
+  min-width: 0;
   background: var(--bg-card);
   color: var(--text-primary);
   border: 1px solid var(--border);

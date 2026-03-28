@@ -2166,6 +2166,12 @@ function ChatView({
           <span className={styles.confirmText}>
             {participantCount > 2 ? 'Leave this chat?' : 'Leave chat?'}
           </span>
+          <p className={styles.confirmDescription}>
+            This will end the conversation for everyone. All messages and shared files will be permanently deleted and cannot be recovered.
+          </p>
+          <Button intent='neutral' onClick={() => setShowEndConfirm(false)}>
+            Cancel
+          </Button>
           {participantCount > 2 && (
             <Button
               intent='destructive'
@@ -2185,9 +2191,6 @@ function ChatView({
             }}
           >
             {participantCount > 2 ? 'Close room' : 'Leave'}
-          </Button>
-          <Button intent='neutral' onClick={() => setShowEndConfirm(false)}>
-            Cancel
           </Button>
         </div>
       )}
