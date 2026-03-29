@@ -1,219 +1,262 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
-import { formatMessage } from '@/utils/format-message'
-import { isEmojiOnly } from '@/utils'
-import { EmojiQuickPick, EmojiFullPicker } from '../emoji-picker'
-import { ReactionDetail } from '../reaction-detail'
-import { IconNotefade } from '../icons'
-import type { MessageReaction, PollOption, GalleryImage } from '@/hooks/use-chat'
-import { TIMED_MESSAGE_TTL_MS, TIMED_MESSAGE_FADEOUT_MS, TIMED_VOICE_FALLBACK_TTL_MS } from '@/constants'
-import styles from './MessageBubble.module.css'
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { formatMessage } from '@/utils/format-message';
+import { isEmojiOnly } from '@/utils';
+import { EmojiQuickPick, EmojiFullPicker } from '../emoji-picker';
+import { ReactionDetail } from '../reaction-detail';
+import { IconNotefade } from '../icons';
+import type {
+  MessageReaction,
+  PollOption,
+  GalleryImage,
+} from '@/hooks/use-chat';
+import {
+  TIMED_MESSAGE_TTL_MS,
+  TIMED_MESSAGE_FADEOUT_MS,
+  TIMED_VOICE_FALLBACK_TTL_MS,
+} from '@/constants';
+import styles from './MessageBubble.module.css';
 
-type PickerMode = 'closed' | 'compact' | 'expanded'
+type PickerMode = 'closed' | 'compact' | 'expanded';
 
 interface MessageBubbleProps {
-  kind?: 'text' | 'audio' | 'image' | 'file' | 'poll' | 'gallery' | 'notefade' | 'notefade-chat'
-  text?: string
-  audioUrl?: string
-  durationMs?: number
-  fileUrl?: string
-  fileName?: string
-  fileMimeType?: string
-  fileSize?: number
-  transferProgress?: number
-  sender: 'self' | 'peer' | 'system'
-  displayName?: string
-  timestamp: number
-  reactions?: MessageReaction[]
-  replyTo?: string
-  replyPreview?: string
-  msgId?: string
-  onReact?: (emoji: string) => void
-  onReply?: () => void
-  onReplyClick?: () => void
-  onCopy?: () => void
-  onDownload?: () => void
-  skipAnimation?: boolean
-  recentEmojis?: readonly string[]
-  timed?: boolean
-  onTimedExpire?: (msgId: string) => void
-  onPlayOnceComplete?: (msgId: string) => void
-  timedConsumed?: boolean
-  autoPlay?: boolean
-  onAudioEnded?: (msgId: string) => void
-  waveform?: readonly number[]
-  onImageClick?: () => void
-  pollQuestion?: string
-  pollEmoji?: string
-  pollOptions?: PollOption[]
-  pollAllowMultiple?: boolean
-  pollMyVotes?: number[]
-  pollId?: string
-  onPollVote?: (pollId: string, optionIndices: number[]) => void
-  notefadeUrl?: string
-  notefadeRevealedText?: string
-  notefadeRevealed?: boolean
-  notefadeDestroyed?: boolean
-  onRevealNotefade?: (messageId: string, url: string) => void
-  onDestroyNotefade?: (messageId: string, url: string) => void
-  gallery?: GalleryImage[]
-  onGalleryImageClick?: (index: number) => void
-  senderColor?: string
-  resolveReactorName?: (reaction: MessageReaction) => string
+  kind?:
+    | 'text'
+    | 'audio'
+    | 'image'
+    | 'file'
+    | 'poll'
+    | 'gallery'
+    | 'notefade'
+    | 'notefade-chat';
+  text?: string;
+  audioUrl?: string;
+  durationMs?: number;
+  fileUrl?: string;
+  fileName?: string;
+  fileMimeType?: string;
+  fileSize?: number;
+  transferProgress?: number;
+  sender: 'self' | 'peer' | 'system';
+  displayName?: string;
+  timestamp: number;
+  reactions?: MessageReaction[];
+  replyTo?: string;
+  replyPreview?: string;
+  msgId?: string;
+  onReact?: (emoji: string) => void;
+  onReply?: () => void;
+  onReplyClick?: () => void;
+  onCopy?: () => void;
+  onDownload?: () => void;
+  skipAnimation?: boolean;
+  recentEmojis?: readonly string[];
+  timed?: boolean;
+  onTimedExpire?: (msgId: string) => void;
+  onPlayOnceComplete?: (msgId: string) => void;
+  timedConsumed?: boolean;
+  autoPlay?: boolean;
+  onAudioEnded?: (msgId: string) => void;
+  waveform?: readonly number[];
+  onImageClick?: () => void;
+  pollQuestion?: string;
+  pollEmoji?: string;
+  pollOptions?: PollOption[];
+  pollAllowMultiple?: boolean;
+  pollMyVotes?: number[];
+  pollId?: string;
+  onPollVote?: (pollId: string, optionIndices: number[]) => void;
+  notefadeUrl?: string;
+  notefadeRevealedText?: string;
+  notefadeRevealed?: boolean;
+  notefadeDestroyed?: boolean;
+  onRevealNotefade?: (messageId: string, url: string) => void;
+  onDestroyNotefade?: (messageId: string, url: string) => void;
+  gallery?: GalleryImage[];
+  onGalleryImageClick?: (index: number) => void;
+  senderColor?: string;
+  resolveReactorName?: (reaction: MessageReaction) => string;
+  onImageLoad?: () => void;
 }
 
 function formatSeconds(seconds: number): string {
-  const total = Math.max(0, Math.round(seconds))
-  const m = Math.floor(total / 60)
-  const s = total % 60
-  return `${m}:${s.toString().padStart(2, '0')}`
+  const total = Math.max(0, Math.round(seconds));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-const SPEEDS = [1, 1.5, 2] as const
+const SPEEDS = [1, 1.5, 2] as const;
 
-function AudioPlayer({ src, durationMs, waveform, isSelf, timestamp, timed, onPlayOnceComplete, autoPlay, onAudioEnded }: {
-  src: string; durationMs?: number; waveform?: readonly number[]; isSelf: boolean; timestamp: number;
-  timed?: boolean; onPlayOnceComplete?: () => void;
-  autoPlay?: boolean; onAudioEnded?: () => void;
+function AudioPlayer({
+  src,
+  durationMs,
+  waveform,
+  isSelf,
+  timestamp,
+  timed,
+  onPlayOnceComplete,
+  autoPlay,
+  onAudioEnded,
+}: {
+  src: string;
+  durationMs?: number;
+  waveform?: readonly number[];
+  isSelf: boolean;
+  timestamp: number;
+  timed?: boolean;
+  onPlayOnceComplete?: () => void;
+  autoPlay?: boolean;
+  onAudioEnded?: () => void;
 }) {
-  const audioRef = useRef<HTMLAudioElement>(null)
-  const trackRef = useRef<HTMLDivElement>(null)
-  const [isPlaying, setIsPlaying] = useState(false)
-  const [progress, setProgress] = useState(0)
-  const [currentTime, setCurrentTime] = useState(0)
-  const [duration, setDuration] = useState(durationMs ? durationMs / 1000 : 0)
-  const [speedIndex, setSpeedIndex] = useState(0)
-  const [hasPlayed, setHasPlayed] = useState(false)
-  const hasPlayedRef = useRef(false)
-  const autoPlayedRef = useRef(false)
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(durationMs ? durationMs / 1000 : 0);
+  const [speedIndex, setSpeedIndex] = useState(0);
+  const [hasPlayed, setHasPlayed] = useState(false);
+  const hasPlayedRef = useRef(false);
+  const autoPlayedRef = useRef(false);
 
-  const isPlayOnce = timed && !isSelf
+  const isPlayOnce = timed && !isSelf;
 
   useEffect(() => {
-    const audio = audioRef.current
-    if (!audio) return
+    const audio = audioRef.current;
+    if (!audio) return;
 
     const onTimeUpdate = () => {
-      const knownDuration = durationMs ? durationMs / 1000 : 0
-      const effectiveDuration = knownDuration > 0
-        ? knownDuration
-        : (audio.duration && isFinite(audio.duration) ? audio.duration : 0)
+      const knownDuration = durationMs ? durationMs / 1000 : 0;
+      const effectiveDuration =
+        knownDuration > 0
+          ? knownDuration
+          : audio.duration && isFinite(audio.duration)
+            ? audio.duration
+            : 0;
       if (effectiveDuration > 0) {
-        setProgress(Math.min(1, audio.currentTime / effectiveDuration))
-        setCurrentTime(audio.currentTime)
+        setProgress(Math.min(1, audio.currentTime / effectiveDuration));
+        setCurrentTime(audio.currentTime);
       }
-    }
+    };
 
     const onLoadedMetadata = () => {
       if (!durationMs && audio.duration && isFinite(audio.duration)) {
-        setDuration(audio.duration)
+        setDuration(audio.duration);
       }
-    }
+    };
 
     const onEnded = () => {
-      setIsPlaying(false)
-      setProgress(0)
-      setCurrentTime(0)
-      onPlayOnceComplete?.()
-      onAudioEnded?.()
-    }
+      setIsPlaying(false);
+      setProgress(0);
+      setCurrentTime(0);
+      onPlayOnceComplete?.();
+      onAudioEnded?.();
+    };
 
-    audio.addEventListener('timeupdate', onTimeUpdate)
-    audio.addEventListener('loadedmetadata', onLoadedMetadata)
-    audio.addEventListener('ended', onEnded)
+    audio.addEventListener('timeupdate', onTimeUpdate);
+    audio.addEventListener('loadedmetadata', onLoadedMetadata);
+    audio.addEventListener('ended', onEnded);
 
     return () => {
-      audio.removeEventListener('timeupdate', onTimeUpdate)
-      audio.removeEventListener('loadedmetadata', onLoadedMetadata)
-      audio.removeEventListener('ended', onEnded)
-    }
-  }, [durationMs, onPlayOnceComplete, onAudioEnded])
+      audio.removeEventListener('timeupdate', onTimeUpdate);
+      audio.removeEventListener('loadedmetadata', onLoadedMetadata);
+      audio.removeEventListener('ended', onEnded);
+    };
+  }, [durationMs, onPlayOnceComplete, onAudioEnded]);
 
   useEffect(() => {
-    if (durationMs) setDuration(durationMs / 1000)
-  }, [durationMs])
+    if (durationMs) setDuration(durationMs / 1000);
+  }, [durationMs]);
 
   useEffect(() => {
     if (autoPlay && !autoPlayedRef.current) {
-      autoPlayedRef.current = true
-      const audio = audioRef.current
-      if (!audio) return
+      autoPlayedRef.current = true;
+      const audio = audioRef.current;
+      if (!audio) return;
       if (isPlayOnce) {
-        if (hasPlayedRef.current) return
-        hasPlayedRef.current = true
-        setHasPlayed(true)
+        if (hasPlayedRef.current) return;
+        hasPlayedRef.current = true;
+        setHasPlayed(true);
       }
-      audio.play().catch(() => setIsPlaying(false))
-      setIsPlaying(true)
+      audio.play().catch(() => setIsPlaying(false));
+      setIsPlaying(true);
     }
     if (!autoPlay) {
-      autoPlayedRef.current = false
+      autoPlayedRef.current = false;
     }
-  }, [autoPlay, isPlayOnce])
+  }, [autoPlay, isPlayOnce]);
 
   const togglePlay = useCallback(() => {
-    const audio = audioRef.current
-    if (!audio) return
+    const audio = audioRef.current;
+    if (!audio) return;
 
     if (isPlayOnce) {
-      if (hasPlayedRef.current) return
-      hasPlayedRef.current = true
-      setHasPlayed(true)
-      audio.play().catch(() => setIsPlaying(false))
-      setIsPlaying(true)
-      return
+      if (hasPlayedRef.current) return;
+      hasPlayedRef.current = true;
+      setHasPlayed(true);
+      audio.play().catch(() => setIsPlaying(false));
+      setIsPlaying(true);
+      return;
     }
 
     if (isPlaying) {
-      audio.pause()
-      setIsPlaying(false)
+      audio.pause();
+      setIsPlaying(false);
     } else {
-      audio.play().catch(() => setIsPlaying(false))
-      setIsPlaying(true)
+      audio.play().catch(() => setIsPlaying(false));
+      setIsPlaying(true);
     }
-  }, [isPlaying, isPlayOnce])
+  }, [isPlaying, isPlayOnce]);
 
-  const handleSeek = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (isPlayOnce) return
-    const audio = audioRef.current
-    const track = trackRef.current
-    if (!audio || !track) return
-    const knownDuration = durationMs ? durationMs / 1000 : 0
-    const effectiveDuration = knownDuration > 0
-      ? knownDuration
-      : (audio.duration && isFinite(audio.duration) ? audio.duration : 0)
-    if (effectiveDuration <= 0) return
-    const rect = track.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const ratio = Math.max(0, Math.min(1, x / rect.width))
-    audio.currentTime = ratio * effectiveDuration
-    setProgress(ratio)
-    setCurrentTime(audio.currentTime)
-  }, [isPlayOnce, durationMs])
+  const handleSeek = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (isPlayOnce) return;
+      const audio = audioRef.current;
+      const track = trackRef.current;
+      if (!audio || !track) return;
+      const knownDuration = durationMs ? durationMs / 1000 : 0;
+      const effectiveDuration =
+        knownDuration > 0
+          ? knownDuration
+          : audio.duration && isFinite(audio.duration)
+            ? audio.duration
+            : 0;
+      if (effectiveDuration <= 0) return;
+      const rect = track.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const ratio = Math.max(0, Math.min(1, x / rect.width));
+      audio.currentTime = ratio * effectiveDuration;
+      setProgress(ratio);
+      setCurrentTime(audio.currentTime);
+    },
+    [isPlayOnce, durationMs],
+  );
 
   const cycleSpeed = useCallback(() => {
-    const next = (speedIndex + 1) % SPEEDS.length
-    setSpeedIndex(next)
-    const rate = SPEEDS[next] ?? 1
+    const next = (speedIndex + 1) % SPEEDS.length;
+    setSpeedIndex(next);
+    const rate = SPEEDS[next] ?? 1;
     if (audioRef.current) {
-      audioRef.current.playbackRate = rate
+      audioRef.current.playbackRate = rate;
     }
-  }, [speedIndex])
+  }, [speedIndex]);
 
-  const timeLabel = isPlaying && duration > 0
-    ? formatSeconds(duration - currentTime)
-    : formatSeconds(duration)
+  const timeLabel =
+    isPlaying && duration > 0
+      ? formatSeconds(duration - currentTime)
+      : formatSeconds(duration);
 
   const formattedTime = new Date(timestamp).toLocaleTimeString([], {
     hour: '2-digit',
     minute: '2-digit',
-  })
+  });
 
-  const hidePlayButton = isPlayOnce && (isPlaying || hasPlayed)
+  const hidePlayButton = isPlayOnce && (isPlaying || hasPlayed);
 
   return (
     <div className={styles.audioPlayer}>
       <div className={styles.audioControls}>
-        <audio ref={audioRef} src={src} preload="metadata" />
+        <audio ref={audioRef} src={src} preload='metadata' />
         <button
           className={`${styles.playButton} ${isSelf ? styles.playButtonSelf : styles.playButtonPeer}${hidePlayButton ? ` ${styles.playButtonHidden}` : ''}`}
           onClick={togglePlay}
@@ -222,13 +265,13 @@ function AudioPlayer({ src, durationMs, waveform, isSelf, timestamp, timed, onPl
           aria-hidden={hidePlayButton || undefined}
         >
           {isPlaying ? (
-            <svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor">
-              <rect x="6" y="4" width="4" height="16" rx="1" />
-              <rect x="14" y="4" width="4" height="16" rx="1" />
+            <svg width='21' height='21' viewBox='0 0 24 24' fill='currentColor'>
+              <rect x='6' y='4' width='4' height='16' rx='1' />
+              <rect x='14' y='4' width='4' height='16' rx='1' />
             </svg>
           ) : (
-            <svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor">
-              <polygon points="7 3 21 12 7 21" />
+            <svg width='21' height='21' viewBox='0 0 24 24' fill='currentColor'>
+              <polygon points='7 3 21 12 7 21' />
             </svg>
           )}
         </button>
@@ -236,7 +279,7 @@ function AudioPlayer({ src, durationMs, waveform, isSelf, timestamp, timed, onPl
           ref={trackRef}
           className={`${styles.waveformTrack}${isPlayOnce ? ` ${styles.waveformTrackNoSeek}` : ''}`}
           onClick={handleSeek}
-          role="progressbar"
+          role='progressbar'
           aria-valuenow={Math.round(progress * 100)}
           aria-valuemin={0}
           aria-valuemax={100}
@@ -247,14 +290,20 @@ function AudioPlayer({ src, durationMs, waveform, isSelf, timestamp, timed, onPl
                 key={i}
                 className={`${styles.waveformBar} ${
                   i / waveform.length < progress
-                    ? (isSelf ? styles.waveformBarPlayedSelf : styles.waveformBarPlayedPeer)
-                    : (isSelf ? styles.waveformBarUnplayedSelf : styles.waveformBarUnplayedPeer)
+                    ? isSelf
+                      ? styles.waveformBarPlayedSelf
+                      : styles.waveformBarPlayedPeer
+                    : isSelf
+                      ? styles.waveformBarUnplayedSelf
+                      : styles.waveformBarUnplayedPeer
                 }`}
                 style={{ height: `${Math.max(3, peak * 28)}px` }}
               />
             ))
           ) : (
-            <div className={`${styles.progressTrackInner} ${isSelf ? styles.progressTrackSelf : styles.progressTrackPeer}`}>
+            <div
+              className={`${styles.progressTrackInner} ${isSelf ? styles.progressTrackSelf : styles.progressTrackPeer}`}
+            >
               <div
                 className={`${styles.progressFill} ${isSelf ? styles.progressFillSelf : styles.progressFillPeer}`}
                 style={{ width: `${progress * 100}%` }}
@@ -267,17 +316,35 @@ function AudioPlayer({ src, durationMs, waveform, isSelf, timestamp, timed, onPl
       <div className={styles.audioMeta}>
         {isPlayOnce ? (
           <span className={styles.timedAudioBadge}>
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <polyline points="12 6 12 12 16 14" />
+            <svg
+              width='10'
+              height='10'
+              viewBox='0 0 24 24'
+              fill='none'
+              stroke='currentColor'
+              strokeWidth='2.5'
+              strokeLinecap='round'
+              strokeLinejoin='round'
+            >
+              <circle cx='12' cy='12' r='10' />
+              <polyline points='12 6 12 12 16 14' />
             </svg>
             timed
           </span>
         ) : timed ? (
           <span className={styles.timedAudioBadge}>
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <polyline points="12 6 12 12 16 14" />
+            <svg
+              width='10'
+              height='10'
+              viewBox='0 0 24 24'
+              fill='none'
+              stroke='currentColor'
+              strokeWidth='2.5'
+              strokeLinecap='round'
+              strokeLinejoin='round'
+            >
+              <circle cx='12' cy='12' r='10' />
+              <polyline points='12 6 12 12 16 14' />
             </svg>
             timed
           </span>
@@ -291,43 +358,46 @@ function AudioPlayer({ src, durationMs, waveform, isSelf, timestamp, timed, onPl
           </button>
         )}
         <div className={styles.audioMetaRight}>
-          <time className={styles.time} dateTime={new Date(timestamp).toISOString()}>
+          <time
+            className={styles.time}
+            dateTime={new Date(timestamp).toISOString()}
+          >
             {formattedTime}
           </time>
         </div>
       </div>
     </div>
-  )
+  );
 }
 
 interface GroupedReaction {
-  emoji: string
-  count: number
-  hasSelf: boolean
+  emoji: string;
+  count: number;
+  hasSelf: boolean;
 }
 
 function groupReactions(reactions: MessageReaction[]): GroupedReaction[] {
-  const map = new Map<string, { count: number; hasSelf: boolean }>()
+  const map = new Map<string, { count: number; hasSelf: boolean }>();
   for (const r of reactions) {
-    const existing = map.get(r.emoji)
+    const existing = map.get(r.emoji);
     if (existing) {
-      existing.count++
-      if (r.fromSelf) existing.hasSelf = true
+      existing.count++;
+      if (r.fromSelf) existing.hasSelf = true;
     } else {
-      map.set(r.emoji, { count: 1, hasSelf: r.fromSelf })
+      map.set(r.emoji, { count: 1, hasSelf: r.fromSelf });
     }
   }
   return Array.from(map.entries()).map(([emoji, { count, hasSelf }]) => ({
     emoji,
     count,
     hasSelf,
-  }))
+  }));
 }
 
 function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function PollBubbleContent({
@@ -341,36 +411,39 @@ function PollBubbleContent({
   isSelf,
   timestamp,
 }: {
-  pollId: string
-  pollEmoji?: string
-  pollQuestion?: string
-  pollOptions: PollOption[]
-  pollAllowMultiple?: boolean
-  pollMyVotes?: number[]
-  onPollVote?: (pollId: string, optionIndices: number[]) => void
-  isSelf: boolean
-  timestamp: number
+  pollId: string;
+  pollEmoji?: string;
+  pollQuestion?: string;
+  pollOptions: PollOption[];
+  pollAllowMultiple?: boolean;
+  pollMyVotes?: number[];
+  onPollVote?: (pollId: string, optionIndices: number[]) => void;
+  isSelf: boolean;
+  timestamp: number;
 }) {
-  const totalVotes = pollOptions.reduce((sum, o) => sum + o.votes, 0)
-  const myVotes = pollMyVotes ?? []
+  const totalVotes = pollOptions.reduce((sum, o) => sum + o.votes, 0);
+  const myVotes = pollMyVotes ?? [];
 
-  const handleOptionClick = useCallback((index: number) => {
-    if (!onPollVote) return
-    if (pollAllowMultiple) {
-      const next = myVotes.includes(index)
-        ? myVotes.filter(i => i !== index)
-        : [...myVotes, index]
-      onPollVote(pollId, next)
-    } else {
-      const next = myVotes.includes(index) ? [] : [index]
-      onPollVote(pollId, next)
-    }
-  }, [onPollVote, pollId, pollAllowMultiple, myVotes])
+  const handleOptionClick = useCallback(
+    (index: number) => {
+      if (!onPollVote) return;
+      if (pollAllowMultiple) {
+        const next = myVotes.includes(index)
+          ? myVotes.filter((i) => i !== index)
+          : [...myVotes, index];
+        onPollVote(pollId, next);
+      } else {
+        const next = myVotes.includes(index) ? [] : [index];
+        onPollVote(pollId, next);
+      }
+    },
+    [onPollVote, pollId, pollAllowMultiple, myVotes],
+  );
 
   const time = new Date(timestamp).toLocaleTimeString([], {
     hour: '2-digit',
     minute: '2-digit',
-  })
+  });
 
   return (
     <div className={styles.pollContent}>
@@ -383,12 +456,12 @@ function PollBubbleContent({
       </span>
       <div className={styles.pollOptions}>
         {pollOptions.map((opt, i) => {
-          const selected = myVotes.includes(i)
-          const pct = totalVotes > 0 ? (opt.votes / totalVotes) * 100 : 0
+          const selected = myVotes.includes(i);
+          const pct = totalVotes > 0 ? (opt.votes / totalVotes) * 100 : 0;
           return (
             <button
               key={i}
-              type="button"
+              type='button'
               className={`${styles.pollOption}${selected ? ` ${styles.pollOptionSelected}` : ''}`}
               onClick={() => handleOptionClick(i)}
               disabled={!onPollVote}
@@ -399,25 +472,33 @@ function PollBubbleContent({
               />
               <span className={styles.pollIndicator}>
                 {pollAllowMultiple
-                  ? (selected ? '\u2611' : '\u2610')
-                  : (selected ? '\u25CF' : '\u25CB')
-                }
+                  ? selected
+                    ? '\u2611'
+                    : '\u2610'
+                  : selected
+                    ? '\u25CF'
+                    : '\u25CB'}
               </span>
               {opt.emoji && <span>{opt.emoji}</span>}
               <span className={styles.pollOptionText}>{opt.text}</span>
               <span className={styles.pollVoteCount}>{opt.votes}</span>
             </button>
-          )
+          );
         })}
       </div>
       <div className={styles.pollFooter}>
-        <span>{totalVotes} vote{totalVotes !== 1 ? 's' : ''}</span>
-        <time className={styles.time} dateTime={new Date(timestamp).toISOString()}>
+        <span>
+          {totalVotes} vote{totalVotes !== 1 ? 's' : ''}
+        </span>
+        <time
+          className={styles.time}
+          dateTime={new Date(timestamp).toISOString()}
+        >
           {time}
         </time>
       </div>
     </div>
-  )
+  );
 }
 
 function GalleryBubbleContent({
@@ -427,33 +508,49 @@ function GalleryBubbleContent({
   timestamp,
   timed,
   onImageClick,
+  onImageLoad,
 }: {
-  gallery: GalleryImage[]
-  caption?: string
-  isSelf: boolean
-  timestamp: number
-  timed?: boolean
-  onImageClick?: (index: number) => void
+  gallery: GalleryImage[];
+  caption?: string;
+  isSelf: boolean;
+  timestamp: number;
+  timed?: boolean;
+  onImageClick?: (index: number) => void;
+  onImageLoad?: () => void;
 }) {
   const time = new Date(timestamp).toLocaleTimeString([], {
     hour: '2-digit',
     minute: '2-digit',
-  })
+  });
 
-  const count = gallery.length
-  const layoutClass = count === 1 ? styles.galleryGrid1
-    : count === 2 ? styles.galleryGrid2
-    : count === 3 ? styles.galleryGrid3
-    : count === 4 ? styles.galleryGrid4
-    : styles.galleryGrid5
+  const count = gallery.length;
+  const layoutClass =
+    count === 1
+      ? styles.galleryGrid1
+      : count === 2
+        ? styles.galleryGrid2
+        : count === 3
+          ? styles.galleryGrid3
+          : count === 4
+            ? styles.galleryGrid4
+            : styles.galleryGrid5;
 
   return (
     <div className={styles.galleryContent}>
       {timed && (
         <span className={styles.timedBadge}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10" />
-            <polyline points="12 6 12 12 16 14" />
+          <svg
+            width='12'
+            height='12'
+            viewBox='0 0 24 24'
+            fill='none'
+            stroke='currentColor'
+            strokeWidth='2.5'
+            strokeLinecap='round'
+            strokeLinejoin='round'
+          >
+            <circle cx='12' cy='12' r='10' />
+            <polyline points='12 6 12 12 16 14' />
           </svg>
           timed
         </span>
@@ -466,7 +563,9 @@ function GalleryBubbleContent({
                 <div className={styles.transferProgressBar}>
                   <div
                     className={`${styles.transferProgressFill} ${isSelf ? styles.transferProgressFillSelf : styles.transferProgressFillPeer}`}
-                    style={{ width: `${Math.round(img.transferProgress * 100)}%` }}
+                    style={{
+                      width: `${Math.round(img.transferProgress * 100)}%`,
+                    }}
                   />
                 </div>
                 <span className={styles.transferText}>
@@ -478,8 +577,11 @@ function GalleryBubbleContent({
                 className={styles.galleryTileImage}
                 src={img.fileUrl}
                 alt={img.fileName}
-                loading="lazy"
-                onClick={onImageClick && !timed ? () => onImageClick(i) : undefined}
+                loading='lazy'
+                onClick={
+                  onImageClick && !timed ? () => onImageClick(i) : undefined
+                }
+                onLoad={onImageLoad}
               />
             ) : (
               <div className={styles.galleryTileProgress}>
@@ -492,11 +594,14 @@ function GalleryBubbleContent({
       {caption && (
         <p className={styles.galleryCaption}>{formatMessage(caption)}</p>
       )}
-      <time className={styles.time} dateTime={new Date(timestamp).toISOString()}>
+      <time
+        className={styles.time}
+        dateTime={new Date(timestamp).toISOString()}
+      >
         {time}
       </time>
     </div>
-  )
+  );
 }
 
 export function MessageBubble({
@@ -548,188 +653,211 @@ export function MessageBubble({
   onGalleryImageClick,
   senderColor: senderColorProp,
   resolveReactorName,
+  onImageLoad,
 }: MessageBubbleProps) {
-  const [pickerMode, setPickerMode] = useState<PickerMode>('closed')
-  const [showReactionDetail, setShowReactionDetail] = useState(false)
-  const [copyDone, setCopyDone] = useState(false)
-  const [compact, setCompact] = useState(false)
-  const [timedTimerProgress, setTimedTimerProgress] = useState(0)
-  const [fadingOut, setFadingOut] = useState(false)
-  const [textExpanded, setTextExpanded] = useState(false)
-  const [textClamped, setTextClamped] = useState(false)
-  const textRef = useRef<HTMLParagraphElement>(null)
-  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const longPressRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const timedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const timedIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const onTimedExpireRef = useRef(onTimedExpire)
-  const bubbleRef = useRef<HTMLDivElement>(null)
-  const emojiTriggerRef = useRef<HTMLButtonElement>(null)
-  const reactionPillRef = useRef<HTMLButtonElement>(null)
+  const [pickerMode, setPickerMode] = useState<PickerMode>('closed');
+  const [showReactionDetail, setShowReactionDetail] = useState(false);
+  const [copyDone, setCopyDone] = useState(false);
+  const [compact, setCompact] = useState(false);
+  const [timedTimerProgress, setTimedTimerProgress] = useState(0);
+  const [fadingOut, setFadingOut] = useState(false);
+  const [textExpanded, setTextExpanded] = useState(false);
+  const [textClamped, setTextClamped] = useState(false);
+  const textRef = useRef<HTMLParagraphElement>(null);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timedIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const onTimedExpireRef = useRef(onTimedExpire);
+  const bubbleRef = useRef<HTMLDivElement>(null);
+  const emojiTriggerRef = useRef<HTMLButtonElement>(null);
+  const reactionPillRef = useRef<HTMLButtonElement>(null);
 
-  onTimedExpireRef.current = onTimedExpire
+  onTimedExpireRef.current = onTimedExpire;
 
   // Timed text messages: auto-start countdown on render
   useEffect(() => {
-    if (!timed || !msgId || kind === 'audio') return
-    const ttl = TIMED_MESSAGE_TTL_MS
-    const startTime = Date.now()
+    if (!timed || !msgId || kind === 'audio') return;
+    const ttl = TIMED_MESSAGE_TTL_MS;
+    const startTime = Date.now();
 
     timedIntervalRef.current = setInterval(() => {
-      setTimedTimerProgress(Math.min(1, (Date.now() - startTime) / ttl))
-    }, 50)
+      setTimedTimerProgress(Math.min(1, (Date.now() - startTime) / ttl));
+    }, 50);
 
     timedTimerRef.current = setTimeout(() => {
-      if (timedIntervalRef.current) clearInterval(timedIntervalRef.current)
-      setTimedTimerProgress(1)
-      setFadingOut(true)
-      setTimeout(() => onTimedExpireRef.current?.(msgId), TIMED_MESSAGE_FADEOUT_MS)
-    }, ttl)
+      if (timedIntervalRef.current) clearInterval(timedIntervalRef.current);
+      setTimedTimerProgress(1);
+      setFadingOut(true);
+      setTimeout(
+        () => onTimedExpireRef.current?.(msgId),
+        TIMED_MESSAGE_FADEOUT_MS,
+      );
+    }, ttl);
 
     return () => {
-      if (timedTimerRef.current) clearTimeout(timedTimerRef.current)
-      if (timedIntervalRef.current) clearInterval(timedIntervalRef.current)
-    }
-  }, [timed, msgId, kind])
+      if (timedTimerRef.current) clearTimeout(timedTimerRef.current);
+      if (timedIntervalRef.current) clearInterval(timedIntervalRef.current);
+    };
+  }, [timed, msgId, kind]);
 
   // Timed audio: fallback TTL timer (receiver never plays, or sender never gets consumed signal)
   useEffect(() => {
-    if (!timed || !msgId || kind !== 'audio') return
-    const ttl = TIMED_VOICE_FALLBACK_TTL_MS
-    const startTime = Date.now()
+    if (!timed || !msgId || kind !== 'audio') return;
+    const ttl = TIMED_VOICE_FALLBACK_TTL_MS;
+    const startTime = Date.now();
 
     timedIntervalRef.current = setInterval(() => {
-      setTimedTimerProgress(Math.min(1, (Date.now() - startTime) / ttl))
-    }, 50)
+      setTimedTimerProgress(Math.min(1, (Date.now() - startTime) / ttl));
+    }, 50);
 
     timedTimerRef.current = setTimeout(() => {
-      if (timedIntervalRef.current) clearInterval(timedIntervalRef.current)
-      setTimedTimerProgress(1)
-      setFadingOut(true)
-      setTimeout(() => onTimedExpireRef.current?.(msgId), TIMED_MESSAGE_FADEOUT_MS)
-    }, ttl)
+      if (timedIntervalRef.current) clearInterval(timedIntervalRef.current);
+      setTimedTimerProgress(1);
+      setFadingOut(true);
+      setTimeout(
+        () => onTimedExpireRef.current?.(msgId),
+        TIMED_MESSAGE_FADEOUT_MS,
+      );
+    }, ttl);
 
     return () => {
-      if (timedTimerRef.current) clearTimeout(timedTimerRef.current)
-      if (timedIntervalRef.current) clearInterval(timedIntervalRef.current)
-    }
-  }, [timed, msgId, kind])
+      if (timedTimerRef.current) clearTimeout(timedTimerRef.current);
+      if (timedIntervalRef.current) clearInterval(timedIntervalRef.current);
+    };
+  }, [timed, msgId, kind]);
 
   // Handle timedConsumed signal (sender side): peer listened, start fade
   useEffect(() => {
-    if (!timedConsumed || !msgId) return
-    if (timedTimerRef.current) clearTimeout(timedTimerRef.current)
-    if (timedIntervalRef.current) clearInterval(timedIntervalRef.current)
-    setFadingOut(true)
-    const t = setTimeout(() => onTimedExpireRef.current?.(msgId), TIMED_MESSAGE_FADEOUT_MS)
-    return () => clearTimeout(t)
-  }, [timedConsumed, msgId])
+    if (!timedConsumed || !msgId) return;
+    if (timedTimerRef.current) clearTimeout(timedTimerRef.current);
+    if (timedIntervalRef.current) clearInterval(timedIntervalRef.current);
+    setFadingOut(true);
+    const t = setTimeout(
+      () => onTimedExpireRef.current?.(msgId),
+      TIMED_MESSAGE_FADEOUT_MS,
+    );
+    return () => clearTimeout(t);
+  }, [timedConsumed, msgId]);
 
   const handleAudioPlayOnceComplete = useCallback(() => {
-    if (!msgId || !timed) return
+    if (!msgId || !timed) return;
     // Cancel fallback timer
-    if (timedTimerRef.current) clearTimeout(timedTimerRef.current)
-    if (timedIntervalRef.current) clearInterval(timedIntervalRef.current)
+    if (timedTimerRef.current) clearTimeout(timedTimerRef.current);
+    if (timedIntervalRef.current) clearInterval(timedIntervalRef.current);
     // Notify parent (sends timed-consumed signal)
-    onPlayOnceComplete?.(msgId)
+    onPlayOnceComplete?.(msgId);
     // Start fade-out
-    setFadingOut(true)
-    setTimeout(() => onTimedExpireRef.current?.(msgId), TIMED_MESSAGE_FADEOUT_MS)
-  }, [msgId, timed, onPlayOnceComplete])
+    setFadingOut(true);
+    setTimeout(
+      () => onTimedExpireRef.current?.(msgId),
+      TIMED_MESSAGE_FADEOUT_MS,
+    );
+  }, [msgId, timed, onPlayOnceComplete]);
 
   const handleAudioEnded = useCallback(() => {
-    if (!msgId) return
-    onAudioEnded?.(msgId)
-  }, [msgId, onAudioEnded])
+    if (!msgId) return;
+    onAudioEnded?.(msgId);
+  }, [msgId, onAudioEnded]);
 
   const handleCopy = useCallback(() => {
-    if (!onCopy || copyDone) return
-    onCopy()
-    setCopyDone(true)
-    copyTimerRef.current = setTimeout(() => setCopyDone(false), 1200)
-  }, [onCopy, copyDone])
+    if (!onCopy || copyDone) return;
+    onCopy();
+    setCopyDone(true);
+    copyTimerRef.current = setTimeout(() => setCopyDone(false), 1200);
+  }, [onCopy, copyDone]);
 
   const handleDoubleClick = useCallback(() => {
     if (onReact && sender !== 'system') {
-      setPickerMode(prev => prev === 'closed' ? 'compact' : 'closed')
+      setPickerMode((prev) => (prev === 'closed' ? 'compact' : 'closed'));
     }
-  }, [onReact, sender])
+  }, [onReact, sender]);
 
   const handleTouchStart = useCallback(() => {
-    if (!onReact || sender === 'system') return
+    if (!onReact || sender === 'system') return;
     longPressRef.current = setTimeout(() => {
-      setPickerMode('compact')
-    }, 500)
-  }, [onReact, sender])
+      setPickerMode('compact');
+    }, 500);
+  }, [onReact, sender]);
 
   const handleTouchEnd = useCallback(() => {
     if (longPressRef.current) {
-      clearTimeout(longPressRef.current)
-      longPressRef.current = null
+      clearTimeout(longPressRef.current);
+      longPressRef.current = null;
     }
-  }, [])
+  }, []);
 
   useEffect(() => {
     return () => {
-      if (longPressRef.current) clearTimeout(longPressRef.current)
-      if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
-    }
-  }, [])
+      if (longPressRef.current) clearTimeout(longPressRef.current);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
-    const el = bubbleRef.current
-    if (!el) return
+    const el = bubbleRef.current;
+    if (!el) return;
     const observer = new ResizeObserver(() => {
-      setCompact(el.offsetHeight < 100)
-    })
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [])
+      setCompact(el.offsetHeight < 100);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
-    const el = textRef.current
-    if (!el || kind !== 'text') return
-    setTextClamped(el.scrollHeight > el.clientHeight)
-  }, [text, kind])
+    const el = textRef.current;
+    if (!el || kind !== 'text') return;
+    setTextClamped(el.scrollHeight > el.clientHeight);
+  }, [text, kind]);
 
-  const handleEmojiSelect = useCallback((emoji: string) => {
-    setPickerMode('closed')
-    onReact?.(emoji)
-  }, [onReact])
+  const handleEmojiSelect = useCallback(
+    (emoji: string) => {
+      setPickerMode('closed');
+      onReact?.(emoji);
+    },
+    [onReact],
+  );
 
   const handleExpand = useCallback(() => {
-    setPickerMode('expanded')
-  }, [])
+    setPickerMode('expanded');
+  }, []);
 
   const handlePillClick = useCallback(() => {
-    setShowReactionDetail(prev => {
-      if (!prev) setPickerMode('closed')
-      return !prev
-    })
-  }, [])
+    setShowReactionDetail((prev) => {
+      if (!prev) setPickerMode('closed');
+      return !prev;
+    });
+  }, []);
 
   if (sender === 'system') {
     return (
-      <div className={`${styles.system}${skipAnimation ? ` ${styles.noAnimation}` : ''}`} role="listitem">
+      <div
+        className={`${styles.system}${skipAnimation ? ` ${styles.noAnimation}` : ''}`}
+        role='listitem'
+      >
         <p className={styles.systemText}>{text ?? ''}</p>
       </div>
-    )
+    );
   }
 
   const time = new Date(timestamp).toLocaleTimeString([], {
     hour: '2-digit',
     minute: '2-digit',
-  })
+  });
 
-  const isSelf = sender === 'self'
-  const grouped = groupReactions(reactions)
-  const hasReactions = grouped.length > 0
-  const emojiOnly = kind === 'text' && !!text && isEmojiOnly(text)
+  const isSelf = sender === 'self';
+  const grouped = groupReactions(reactions);
+  const hasReactions = grouped.length > 0;
+  const emojiOnly = kind === 'text' && !!text && isEmojiOnly(text);
 
-  const anchorRect = emojiTriggerRef.current?.getBoundingClientRect()
+  const anchorRect = emojiTriggerRef.current?.getBoundingClientRect();
 
   return (
-    <div className={`${styles.bubbleWrapper} ${isSelf ? styles.bubbleWrapperSelf : styles.bubbleWrapperPeer}${kind === 'audio' ? ` ${styles.bubbleWrapperAudio}` : ''}${kind === 'image' ? ` ${styles.bubbleWrapperImage}` : ''}${kind === 'file' ? ` ${styles.bubbleWrapperFile}` : ''}${kind === 'gallery' ? ` ${styles.bubbleWrapperGallery}` : ''}${kind === 'notefade' || kind === 'notefade-chat' ? ` ${styles.bubbleWrapperNotefade}` : ''}${hasReactions ? ` ${styles.bubbleWrapperHasReactions}` : ''}${emojiOnly ? ` ${styles.bubbleWrapperEmoji}` : ''}${fadingOut ? ` ${styles.timedFadingOut}` : ''}`} data-msg-id={msgId} role="listitem">
+    <div
+      className={`${styles.bubbleWrapper} ${isSelf ? styles.bubbleWrapperSelf : styles.bubbleWrapperPeer}${kind === 'audio' ? ` ${styles.bubbleWrapperAudio}` : ''}${kind === 'image' ? ` ${styles.bubbleWrapperImage}` : ''}${kind === 'file' ? ` ${styles.bubbleWrapperFile}` : ''}${kind === 'gallery' ? ` ${styles.bubbleWrapperGallery}` : ''}${kind === 'notefade' || kind === 'notefade-chat' ? ` ${styles.bubbleWrapperNotefade}` : ''}${hasReactions ? ` ${styles.bubbleWrapperHasReactions}` : ''}${emojiOnly ? ` ${styles.bubbleWrapperEmoji}` : ''}${fadingOut ? ` ${styles.timedFadingOut}` : ''}`}
+      data-msg-id={msgId}
+      role='listitem'
+    >
       <div
         ref={bubbleRef}
         className={`${styles.bubble} ${isSelf ? styles.self : styles.peer}${compact && kind !== 'audio' ? ` ${styles.compactActions}` : ''}${kind === 'audio' ? ` ${styles.audioActions}` : ''}${emojiOnly ? ` ${styles.emojiOnlyBubble}` : ''}${skipAnimation ? ` ${styles.noAnimation}` : ''}`}
@@ -738,7 +866,14 @@ export function MessageBubble({
         onTouchEnd={handleTouchEnd}
         onTouchCancel={handleTouchEnd}
       >
-        {displayName && <p className={styles.displayName} style={senderColorProp ? { color: senderColorProp } : undefined}>{displayName}</p>}
+        {displayName && (
+          <p
+            className={styles.displayName}
+            style={senderColorProp ? { color: senderColorProp } : undefined}
+          >
+            {displayName}
+          </p>
+        )}
         {replyTo && replyPreview && (
           <div
             className={`${styles.quoteBlock}${onReplyClick ? ` ${styles.quoteBlockClickable}` : ''}`}
@@ -756,7 +891,9 @@ export function MessageBubble({
             isSelf={isSelf}
             timestamp={timestamp}
             timed={timed}
-            onPlayOnceComplete={timed && !isSelf ? handleAudioPlayOnceComplete : undefined}
+            onPlayOnceComplete={
+              timed && !isSelf ? handleAudioPlayOnceComplete : undefined
+            }
             autoPlay={autoPlay}
             onAudioEnded={handleAudioEnded}
           />
@@ -764,9 +901,18 @@ export function MessageBubble({
           <div className={styles.imageContainer}>
             {timed && (
               <span className={styles.timedBadge}>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10" />
-                  <polyline points="12 6 12 12 16 14" />
+                <svg
+                  width='12'
+                  height='12'
+                  viewBox='0 0 24 24'
+                  fill='none'
+                  stroke='currentColor'
+                  strokeWidth='2.5'
+                  strokeLinecap='round'
+                  strokeLinejoin='round'
+                >
+                  <circle cx='12' cy='12' r='10' />
+                  <polyline points='12 6 12 12 16 14' />
                 </svg>
                 timed
               </span>
@@ -789,24 +935,42 @@ export function MessageBubble({
                 className={styles.imageContent}
                 src={fileUrl}
                 alt={fileName ?? 'Image'}
-                loading="lazy"
+                loading='lazy'
                 onClick={onImageClick}
+                onLoad={onImageLoad}
               />
             ) : null}
             <div className={styles.imageFooter}>
-              {fileName && <span className={styles.imageFileName}>{fileName}</span>}
-              <time className={styles.time} dateTime={new Date(timestamp).toISOString()}>
+              {fileName && (
+                <span className={styles.imageFileName}>{fileName}</span>
+              )}
+              <time
+                className={styles.time}
+                dateTime={new Date(timestamp).toISOString()}
+              >
                 {time}
               </time>
             </div>
           </div>
-        ) : kind === 'file' && fileMimeType?.startsWith('audio/') && fileUrl && transferProgress === undefined ? (
+        ) : kind === 'file' &&
+          fileMimeType?.startsWith('audio/') &&
+          fileUrl &&
+          transferProgress === undefined ? (
           <div className={styles.audioFileCard}>
             {timed && (
               <span className={styles.timedBadge}>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10" />
-                  <polyline points="12 6 12 12 16 14" />
+                <svg
+                  width='12'
+                  height='12'
+                  viewBox='0 0 24 24'
+                  fill='none'
+                  stroke='currentColor'
+                  strokeWidth='2.5'
+                  strokeLinecap='round'
+                  strokeLinejoin='round'
+                >
+                  <circle cx='12' cy='12' r='10' />
+                  <polyline points='12 6 12 12 16 14' />
                 </svg>
                 timed
               </span>
@@ -817,35 +981,62 @@ export function MessageBubble({
               isSelf={isSelf}
               timestamp={timestamp}
               timed={timed}
-              onPlayOnceComplete={timed && !isSelf ? handleAudioPlayOnceComplete : undefined}
+              onPlayOnceComplete={
+                timed && !isSelf ? handleAudioPlayOnceComplete : undefined
+              }
               onAudioEnded={handleAudioEnded}
             />
             <div className={styles.audioFileMeta}>
               <span className={styles.audioFileName}>{fileName}</span>
-              {fileSize ? <span className={styles.audioFileSize}>{formatFileSize(fileSize)}</span> : null}
+              {fileSize ? (
+                <span className={styles.audioFileSize}>
+                  {formatFileSize(fileSize)}
+                </span>
+              ) : null}
             </div>
           </div>
         ) : kind === 'file' ? (
           <div className={styles.fileCard}>
             {timed && (
               <span className={styles.timedBadge}>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10" />
-                  <polyline points="12 6 12 12 16 14" />
+                <svg
+                  width='12'
+                  height='12'
+                  viewBox='0 0 24 24'
+                  fill='none'
+                  stroke='currentColor'
+                  strokeWidth='2.5'
+                  strokeLinecap='round'
+                  strokeLinejoin='round'
+                >
+                  <circle cx='12' cy='12' r='10' />
+                  <polyline points='12 6 12 12 16 14' />
                 </svg>
                 timed
               </span>
             )}
             <div className={styles.fileCardBody}>
-              <svg className={styles.fileIcon} width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <polyline points="14 2 14 8 20 8" />
+              <svg
+                className={styles.fileIcon}
+                width='28'
+                height='28'
+                viewBox='0 0 24 24'
+                fill='none'
+                stroke='currentColor'
+                strokeWidth='2'
+                strokeLinecap='round'
+                strokeLinejoin='round'
+              >
+                <path d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z' />
+                <polyline points='14 2 14 8 20 8' />
               </svg>
               <div className={styles.fileInfo}>
                 <span className={styles.fileName}>{fileName ?? 'File'}</span>
                 <span className={styles.fileMeta}>
                   {fileSize ? formatFileSize(fileSize) : ''}
-                  {fileMimeType ? ` · ${fileMimeType.split('/')[1] ?? fileMimeType}` : ''}
+                  {fileMimeType
+                    ? ` · ${fileMimeType.split('/')[1] ?? fileMimeType}`
+                    : ''}
                 </span>
               </div>
             </div>
@@ -857,7 +1048,10 @@ export function MessageBubble({
                 />
               </div>
             ) : null}
-            <time className={styles.time} dateTime={new Date(timestamp).toISOString()}>
+            <time
+              className={styles.time}
+              dateTime={new Date(timestamp).toISOString()}
+            >
               {time}
             </time>
           </div>
@@ -881,26 +1075,33 @@ export function MessageBubble({
             timestamp={timestamp}
             timed={timed}
             onImageClick={onGalleryImageClick}
+            onImageLoad={onImageLoad}
           />
         ) : kind === 'notefade' && notefadeUrl ? (
           <>
             <a
               href={notefadeUrl}
-              target="_blank"
-              rel="noopener noreferrer"
+              target='_blank'
+              rel='noopener noreferrer'
               className={styles.notefadeCard}
               onClick={(e) => e.stopPropagation()}
             >
               <div className={styles.notefadeCardHeader}>
                 <IconNotefade size={18} />
-                <span className={styles.notefadeCardTitle}>Self-destructing note</span>
+                <span className={styles.notefadeCardTitle}>
+                  Self-destructing note
+                </span>
               </div>
               <p className={styles.notefadeCardBody}>
-                Tap to open on notefade.com — this note will self-destruct after reading.
+                Tap to open on notefade.com - this note will self-destruct after
+                reading.
               </p>
               <span className={styles.notefadeCardDomain}>notefade.com</span>
             </a>
-            <time className={styles.time} dateTime={new Date(timestamp).toISOString()}>
+            <time
+              className={styles.time}
+              dateTime={new Date(timestamp).toISOString()}
+            >
               {time}
             </time>
           </>
@@ -912,7 +1113,9 @@ export function MessageBubble({
                 <span className={styles.notefadeCardTitle}>Secret note</span>
               </div>
               {notefadeDestroyed ? (
-                <span className={styles.notefadeStatusLabel}>Note was destroyed</span>
+                <span className={styles.notefadeStatusLabel}>
+                  Note was destroyed
+                </span>
               ) : isSelf ? (
                 notefadeRevealed ? (
                   <span className={styles.notefadeStatusLabel}>
@@ -924,12 +1127,12 @@ export function MessageBubble({
                       Waiting for recipient to reveal this note.
                     </p>
                     <button
-                      type="button"
+                      type='button'
                       className={styles.notefadeDestroyBtn}
                       onClick={(e) => {
-                        e.stopPropagation()
+                        e.stopPropagation();
                         if (msgId && onDestroyNotefade) {
-                          onDestroyNotefade(msgId, notefadeUrl)
+                          onDestroyNotefade(msgId, notefadeUrl);
                         }
                       }}
                     >
@@ -937,34 +1140,38 @@ export function MessageBubble({
                     </button>
                   </>
                 )
+              ) : notefadeRevealedText ? (
+                <>
+                  <p className={styles.notefadeRevealedText}>
+                    {notefadeRevealedText}
+                  </p>
+                  <span className={styles.notefadeRevealedLabel}>Revealed</span>
+                </>
               ) : (
-                notefadeRevealedText ? (
-                  <>
-                    <p className={styles.notefadeRevealedText}>{notefadeRevealedText}</p>
-                    <span className={styles.notefadeRevealedLabel}>Revealed</span>
-                  </>
-                ) : (
-                  <>
-                    <p className={styles.notefadeCardBody}>
-                      Click to reveal — this note will self-destruct after reading.
-                    </p>
-                    <button
-                      type="button"
-                      className={styles.notefadeRevealBtn}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        if (msgId && onRevealNotefade) {
-                          onRevealNotefade(msgId, notefadeUrl)
-                        }
-                      }}
-                    >
-                      Reveal
-                    </button>
-                  </>
-                )
+                <>
+                  <p className={styles.notefadeCardBody}>
+                    Click to reveal - this note will self-destruct after
+                    reading.
+                  </p>
+                  <button
+                    type='button'
+                    className={styles.notefadeRevealBtn}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (msgId && onRevealNotefade) {
+                        onRevealNotefade(msgId, notefadeUrl);
+                      }
+                    }}
+                  >
+                    Reveal
+                  </button>
+                </>
               )}
             </div>
-            <time className={styles.time} dateTime={new Date(timestamp).toISOString()}>
+            <time
+              className={styles.time}
+              dateTime={new Date(timestamp).toISOString()}
+            >
               {time}
             </time>
           </>
@@ -972,9 +1179,18 @@ export function MessageBubble({
           <>
             {timed && (
               <span className={styles.timedBadge}>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10" />
-                  <polyline points="12 6 12 12 16 14" />
+                <svg
+                  width='12'
+                  height='12'
+                  viewBox='0 0 24 24'
+                  fill='none'
+                  stroke='currentColor'
+                  strokeWidth='2.5'
+                  strokeLinecap='round'
+                  strokeLinejoin='round'
+                >
+                  <circle cx='12' cy='12' r='10' />
+                  <polyline points='12 6 12 12 16 14' />
                 </svg>
                 timed
               </span>
@@ -982,24 +1198,37 @@ export function MessageBubble({
             <p
               ref={kind === 'text' && !emojiOnly ? textRef : undefined}
               className={`${styles.text}${emojiOnly ? ` ${styles.emojiOnly}` : ''}${kind === 'text' && !emojiOnly && !textExpanded ? ` ${styles.textCollapsible}` : ''}`}
-            >{text ? formatMessage(text) : ''}</p>
+            >
+              {text ? formatMessage(text) : ''}
+            </p>
             {textClamped && !textExpanded && (
               <button
-                type="button"
+                type='button'
                 className={styles.readMore}
-                onClick={(e) => { e.stopPropagation(); setTextExpanded(true) }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setTextExpanded(true);
+                }}
               >
                 Read more
               </button>
             )}
             {emojiOnly ? (
-              <span className={`${styles.emojiOnlyTimePill} ${isSelf ? styles.emojiOnlyTimePillSelf : styles.emojiOnlyTimePillPeer}`}>
-                <time className={styles.time} dateTime={new Date(timestamp).toISOString()}>
+              <span
+                className={`${styles.emojiOnlyTimePill} ${isSelf ? styles.emojiOnlyTimePillSelf : styles.emojiOnlyTimePillPeer}`}
+              >
+                <time
+                  className={styles.time}
+                  dateTime={new Date(timestamp).toISOString()}
+                >
                   {time}
                 </time>
               </span>
             ) : (
-              <time className={styles.time} dateTime={new Date(timestamp).toISOString()}>
+              <time
+                className={styles.time}
+                dateTime={new Date(timestamp).toISOString()}
+              >
                 {time}
               </time>
             )}
@@ -1013,78 +1242,139 @@ export function MessageBubble({
             />
           </div>
         )}
-        {onCopy && (kind === 'text' || (kind === 'notefade-chat' && notefadeRevealedText)) && !emojiOnly && (
-          <button
-            type="button"
-            className={`${styles.copyButton} ${copyDone ? styles.copyDone : ''}`}
-            onClick={handleCopy}
-            aria-label={copyDone ? 'Copied' : 'Copy message'}
-          >
-            {copyDone ? (
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="20 6 9 17 4 12" />
+        {onCopy &&
+          (kind === 'text' ||
+            (kind === 'notefade-chat' && notefadeRevealedText)) &&
+          !emojiOnly && (
+            <button
+              type='button'
+              className={`${styles.copyButton} ${copyDone ? styles.copyDone : ''}`}
+              onClick={handleCopy}
+              aria-label={copyDone ? 'Copied' : 'Copy message'}
+            >
+              {copyDone ? (
+                <svg
+                  width='12'
+                  height='12'
+                  viewBox='0 0 24 24'
+                  fill='none'
+                  stroke='currentColor'
+                  strokeWidth='3'
+                  strokeLinecap='round'
+                  strokeLinejoin='round'
+                >
+                  <polyline points='20 6 9 17 4 12' />
+                </svg>
+              ) : (
+                <svg
+                  width='12'
+                  height='12'
+                  viewBox='0 0 24 24'
+                  fill='none'
+                  stroke='currentColor'
+                  strokeWidth='2.5'
+                  strokeLinecap='round'
+                  strokeLinejoin='round'
+                >
+                  <rect x='9' y='9' width='13' height='13' rx='2' />
+                  <path d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1' />
+                </svg>
+              )}
+            </button>
+          )}
+        {onDownload &&
+          (kind === 'audio' ||
+            kind === 'image' ||
+            kind === 'file' ||
+            kind === 'gallery') && (
+            <button
+              type='button'
+              className={styles.downloadActionButton}
+              onClick={onDownload}
+              aria-label='Download voice note'
+            >
+              <svg
+                width='12'
+                height='12'
+                viewBox='0 0 24 24'
+                fill='none'
+                stroke='currentColor'
+                strokeWidth='2.5'
+                strokeLinecap='round'
+                strokeLinejoin='round'
+              >
+                <path d='M12 3v13m0 0l-4-4m4 4l4-4' />
+                <path d='M5 20h14' />
               </svg>
-            ) : (
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="9" y="9" width="13" height="13" rx="2" />
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-              </svg>
-            )}
-          </button>
-        )}
-        {onDownload && (kind === 'audio' || kind === 'image' || kind === 'file' || kind === 'gallery') && (
-          <button
-            type="button"
-            className={styles.downloadActionButton}
-            onClick={onDownload}
-            aria-label="Download voice note"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 3v13m0 0l-4-4m4 4l4-4" />
-              <path d="M5 20h14" />
-            </svg>
-          </button>
-        )}
+            </button>
+          )}
         {onReply && (
           <button
-            type="button"
+            type='button'
             className={styles.replyButton}
             onClick={onReply}
-            aria-label="Reply"
+            aria-label='Reply'
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 17l-5-5 5-5" />
-              <path d="M4 12h11a4 4 0 0 1 0 8h-1" />
+            <svg
+              width='12'
+              height='12'
+              viewBox='0 0 24 24'
+              fill='none'
+              stroke='currentColor'
+              strokeWidth='2.5'
+              strokeLinecap='round'
+              strokeLinejoin='round'
+            >
+              <path d='M9 17l-5-5 5-5' />
+              <path d='M4 12h11a4 4 0 0 1 0 8h-1' />
             </svg>
           </button>
         )}
         {onReact && (
           <button
             ref={emojiTriggerRef}
-            type="button"
+            type='button'
             className={styles.emojiTrigger}
-            onClick={() => { setPickerMode(prev => prev === 'closed' ? 'compact' : 'closed'); setShowReactionDetail(false) }}
-            aria-label="React"
+            onClick={() => {
+              setPickerMode((prev) =>
+                prev === 'closed' ? 'compact' : 'closed',
+              );
+              setShowReactionDetail(false);
+            }}
+            aria-label='React'
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <path d="M8 14s1.5 2 4 2 4-2 4-2" />
-              <line x1="9" y1="9" x2="9.01" y2="9" />
-              <line x1="15" y1="9" x2="15.01" y2="9" />
+            <svg
+              width='14'
+              height='14'
+              viewBox='0 0 24 24'
+              fill='none'
+              stroke='currentColor'
+              strokeWidth='2'
+              strokeLinecap='round'
+              strokeLinejoin='round'
+            >
+              <circle cx='12' cy='12' r='10' />
+              <path d='M8 14s1.5 2 4 2 4-2 4-2' />
+              <line x1='9' y1='9' x2='9.01' y2='9' />
+              <line x1='15' y1='9' x2='15.01' y2='9' />
             </svg>
           </button>
         )}
         {hasReactions && (
           <button
             ref={reactionPillRef}
-            type="button"
+            type='button'
             className={`${styles.reactionPill} ${isSelf ? styles.reactionPillSelf : styles.reactionPillPeer}`}
             onClick={handlePillClick}
           >
-            {grouped.map(r => (
-              <span key={r.emoji} className={styles.reactionEmoji}>{r.emoji}</span>
+            {grouped.map((r) => (
+              <span key={r.emoji} className={styles.reactionEmoji}>
+                {r.emoji}
+              </span>
             ))}
-            {reactions.length > 1 && <span className={styles.reactionCount}>{reactions.length}</span>}
+            {reactions.length > 1 && (
+              <span className={styles.reactionCount}>{reactions.length}</span>
+            )}
           </button>
         )}
       </div>
@@ -1112,11 +1402,14 @@ export function MessageBubble({
           reactions={reactions}
           anchorRect={reactionPillRef.current.getBoundingClientRect()}
           alignRight={isSelf}
-          onRemoveReaction={(emoji) => { onReact?.(emoji); setShowReactionDetail(false) }}
+          onRemoveReaction={(emoji) => {
+            onReact?.(emoji);
+            setShowReactionDetail(false);
+          }}
           onClose={() => setShowReactionDetail(false)}
           resolveReactorName={resolveReactorName}
         />
       )}
     </div>
-  )
+  );
 }
