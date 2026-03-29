@@ -28,6 +28,7 @@ export function PhotoComposer({ onSend, onClose, recentEmojis = [], onTrackEmoji
   const fileInputRef = useRef<HTMLInputElement>(null)
   const captionRef = useRef<HTMLInputElement>(null)
   const emojiBtnRef = useRef<HTMLButtonElement>(null)
+  const thumbnailStripRef = useRef<HTMLDivElement>(null)
   const hasAutoOpened = useRef(false)
 
   useEffect(() => {
@@ -62,6 +63,14 @@ export function PhotoComposer({ onSend, onClose, recentEmojis = [], onTrackEmoji
       photos.forEach(p => URL.revokeObjectURL(p.previewUrl))
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-scroll thumbnail strip to the end when photos are added
+  useEffect(() => {
+    const el = thumbnailStripRef.current
+    if (el && photos.length > 0) {
+      el.scrollTo({ left: el.scrollWidth, behavior: 'smooth' })
+    }
+  }, [photos.length])
 
   const addFiles = useCallback((files: FileList | File[]) => {
     const fileArray = Array.from(files)
@@ -215,7 +224,7 @@ export function PhotoComposer({ onSend, onClose, recentEmojis = [], onTrackEmoji
             </div>
 
             {/* Thumbnail strip */}
-            <div className={styles.thumbnailStrip}>
+            <div ref={thumbnailStripRef} className={styles.thumbnailStrip}>
               {photos.map((photo, i) => (
                 <div
                   key={photo.previewUrl}
