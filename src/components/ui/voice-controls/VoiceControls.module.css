@@ -3,7 +3,6 @@
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 0.6rem;
-  border-bottom: 1px solid var(--border);
   animation: fadeIn 0.2s ease-out;
 }
 
@@ -92,7 +91,9 @@
   border-radius: 50%;
   border: none;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .muteButton {
@@ -210,12 +211,26 @@
 
 .screenShareActiveButton {
   composes: controlButton;
-  background: rgba(var(--accent-rgb, 99, 102, 241), 0.15);
-  color: var(--accent);
+  background: var(--error);
+  color: #fff;
+  box-shadow: 0 0 6px 2px rgba(var(--error-rgb, 239, 68, 68), 0.5),
+              0 0 14px 5px rgba(var(--error-rgb, 239, 68, 68), 0.25);
+  animation: screenShareGlow 2s ease-in-out infinite;
 }
 
 .screenShareActiveButton:hover {
-  background: rgba(var(--accent-rgb, 99, 102, 241), 0.25);
+  background: rgba(var(--error-rgb, 239, 68, 68), 0.2);
+}
+
+@keyframes screenShareGlow {
+  0%, 100% {
+    box-shadow: 0 0 6px 2px rgba(var(--error-rgb, 239, 68, 68), 0.5),
+                0 0 14px 5px rgba(var(--error-rgb, 239, 68, 68), 0.25);
+  }
+  50% {
+    box-shadow: 0 0 8px 3px rgba(var(--error-rgb, 239, 68, 68), 0.65),
+                0 0 20px 8px rgba(var(--error-rgb, 239, 68, 68), 0.35);
+  }
 }
 
 .endCallButton {
@@ -248,7 +263,6 @@
   opacity: 0.85;
 }
 
-
 .privacyNotice {
   display: flex;
   flex-direction: column;
@@ -272,7 +286,6 @@
   justify-content: flex-end;
 }
 
-
 .endedText {
   color: var(--text-secondary);
   font-size: 0.8rem;
@@ -284,18 +297,77 @@
   font-size: 0.8rem;
 }
 
+/* Voice activity glow on mic button */
+.micGlowActive {
+  box-shadow:
+    0 0 6px 2px rgba(var(--error-rgb, 239, 68, 68), 0.5),
+    0 0 14px 5px rgba(var(--error-rgb, 239, 68, 68), 0.25);
+  transition: box-shadow 0.15s ease-in-out;
+}
+
+/* Inline waveform visualizer */
+.waveformInline {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: 3.75rem;
+  height: 1.875rem;
+  flex-shrink: 0;
+}
+
+.waveformBar {
+  width: 3px;
+  border-radius: 1px;
+  min-height: 3px;
+  background: var(--accent);
+  opacity: 0.7;
+}
+
+.waveformBarMuted {
+  width: 3px;
+  border-radius: 1px;
+  min-height: 3px;
+  background: var(--error, rgb(239, 68, 68));
+  opacity: 0.7;
+}
+
+@media (max-width: 520px) {
+  .waveformInline {
+    display: none;
+  }
+}
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes incomingPulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb, 99, 102, 241), 0.16); }
-  50% { box-shadow: 0 0 0 4px rgba(var(--accent-rgb, 99, 102, 241), 0); }
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(var(--accent-rgb, 99, 102, 241), 0.16);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(var(--accent-rgb, 99, 102, 241), 0);
+  }
+}
+
+@media (max-width: 480px) {
+  .wrapper {
+    padding: 0.5rem 0rem;
+  }
 }

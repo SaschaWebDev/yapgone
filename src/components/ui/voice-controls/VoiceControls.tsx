@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import type { CallState } from '@/types';
+import { useAudioAnalyser } from '@/hooks';
 import { Button } from '../button';
 import {
   IconPhone,
@@ -9,9 +10,8 @@ import {
   IconScreenShareOff,
   IconSpeaker,
   IconSpeakerOff,
-  IconLock,
-  IconLockOpen,
 } from '../icons';
+import { AudioWaveform } from './AudioWaveform';
 import styles from './VoiceControls.module.css';
 
 type PrivacyAction = 'start' | 'accept';
@@ -44,6 +44,8 @@ interface VoiceControlsProps {
   onStopScreenShare: () => void;
   onAcceptE2eeDowngrade: () => void;
   onDeclineE2eeDowngrade: () => void;
+  localStream: MediaStream | null;
+  remoteStream: MediaStream | null;
 }
 
 function formatDuration(seconds: number): string {
@@ -59,23 +61,25 @@ export function VoiceControls({
   privacyAcknowledged,
   isScreenSharing,
   isDeafened,
-  isE2eeEnabled,
+  isE2eeEnabled: _isE2eeEnabled,
   isReconnecting,
-  e2eeDowngradeRequested,
-  e2eeDowngradeIncoming,
+  e2eeDowngradeRequested: _e2eeDowngradeRequested,
+  e2eeDowngradeIncoming: _e2eeDowngradeIncoming,
   onStartCall,
   onAcceptCall,
   onDeclineCall,
   onEndCall,
   onToggleMute,
   onToggleDeafen,
-  onToggleE2ee,
+  onToggleE2ee: _onToggleE2ee,
   onAcknowledgePrivacy,
   onResetCallState,
   onStartScreenShare,
   onStopScreenShare,
-  onAcceptE2eeDowngrade,
-  onDeclineE2eeDowngrade,
+  onAcceptE2eeDowngrade: _onAcceptE2eeDowngrade,
+  onDeclineE2eeDowngrade: _onDeclineE2eeDowngrade,
+  localStream,
+  remoteStream,
 }: VoiceControlsProps) {
   const [showPrivacyNotice, setShowPrivacyNotice] = useState(false);
   const [pendingPrivacyAction, setPendingPrivacyAction] =
@@ -86,6 +90,9 @@ export function VoiceControls({
   const dialtoneRef = useRef<HTMLAudioElement | null>(null);
   const declineSfxRef = useRef<HTMLAudioElement | null>(null);
   const prevCallStateRef = useRef<CallState>(callState);
+
+  const { analyserRef: localAnalyserRef, isSpeaking } = useAudioAnalyser(localStream);
+  const { analyserRef: remoteAnalyserRef } = useAudioAnalyser(remoteStream);
 
   useEffect(() => {
     const ringtone = new Audio('/yapgone-ringtone.mp3');
@@ -364,37 +371,22 @@ export function VoiceControls({
         {isReconnecting && (
           <span className={styles.reconnectingText}>Switching...</span>
         )}
-        {e2eeDowngradeRequested && (
-          <span className={styles.e2eeRequestingText}>Requesting...</span>
-        )}
-        {e2eeDowngradeIncoming && (
-          <div className={`${styles.banner} ${styles.e2eeDowngradeBanner}`}>
-            <span
-              className={`${styles.bannerText} ${styles.e2eeDowngradeText}`}
-            >
-              Partner wants to disable encryption
-            </span>
-            <Button intent='neutral' size='sm' onClick={onDeclineE2eeDowngrade}>
-              Cancel
-            </Button>
-            <Button
-              intent='positive'
-              size='sm'
-              onClick={onAcceptE2eeDowngrade}
-            >
-              OK, I understand
-            </Button>
-          </div>
-        )}
+        {/*
+          E2EE downgrade UI — hidden because the E2EE toggle is currently
+          disabled (see comment below). These banners showed when a peer
+          requested to disable encryption. Keep in sync with the toggle if
+          it is ever re-enabled.
+        */}
         <div className={styles.banner} />
         <button
-          className={isMuted ? styles.mutedButton : styles.muteButton}
+          className={`${isMuted ? styles.mutedButton : styles.muteButton}${!isMuted && isSpeaking ? ` ${styles.micGlowActive}` : ''}`}
           onClick={onToggleMute}
           title={isMuted ? 'Unmute' : 'Mute'}
           aria-label={isMuted ? 'Unmute microphone' : 'Mute microphone'}
         >
           {isMuted ? <IconMicOff size={21} /> : <IconMic size={21} />}
         </button>
+        <AudioWaveform analyserRef={localAnalyserRef} muted={isMuted} />
         <button
           className={isDeafened ? styles.deafenedButton : styles.deafenButton}
           onClick={onToggleDeafen}
@@ -407,6 +399,7 @@ export function VoiceControls({
             <IconSpeaker size={21} />
           )}
         </button>
+        <AudioWaveform analyserRef={remoteAnalyserRef} muted={isDeafened} />
         {typeof navigator !== 'undefined' &&
           navigator.mediaDevices &&
           typeof navigator.mediaDevices.getDisplayMedia === 'function' && (
@@ -429,19 +422,15 @@ export function VoiceControls({
               )}
             </button>
           )}
-        <button
-          className={isE2eeEnabled ? styles.e2eeOnButton : styles.e2eeOffButton}
-          onClick={onToggleE2ee}
-          disabled={isReconnecting || e2eeDowngradeRequested}
-          title={isE2eeEnabled ? 'Disable encryption' : 'Enable encryption'}
-          aria-label={
-            isE2eeEnabled
-              ? 'Disable voice encryption'
-              : 'Enable voice encryption'
-          }
-        >
-          {isE2eeEnabled ? <IconLock size={21} /> : <IconLockOpen size={21} />}
-        </button>
+        {/*
+          TODO: Decide whether to permanently remove or re-introduce this.
+          E2EE toggle button — allows the user to disable end-to-end encryption
+          on the voice call for potentially higher audio quality (unencrypted
+          WebRTC). Currently hidden because encrypted call quality is good enough
+          and exposing a "make less secure" button may confuse users. All
+          underlying logic (softReconnect, downgrade handshake, e2ee signals)
+          is preserved in use-voice-call.ts.
+        */}
         <button
           className={styles.endCallButton}
           onClick={onEndCall}
