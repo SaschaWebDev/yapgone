@@ -1,6 +1,7 @@
 import { useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { senderColor } from '@/hooks/chat-helpers'
+import { IconPhone } from '../icons'
 import styles from './ParticipantList.module.css'
 
 interface Participant {
@@ -12,9 +13,11 @@ interface Participant {
 interface ParticipantListProps {
   participants: Participant[]
   onClose: () => void
+  onCallParticipant?: (clientId: string) => void
+  canCall?: boolean
 }
 
-export function ParticipantList({ participants, onClose }: ParticipantListProps) {
+export function ParticipantList({ participants, onClose, onCallParticipant, canCall }: ParticipantListProps) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
@@ -50,6 +53,17 @@ export function ParticipantList({ participants, onClose }: ParticipantListProps)
                 {p.username ?? 'Anonymous'}
               </span>
               {p.isYou && <span className={styles.badge}>(you)</span>}
+              {!p.isYou && canCall && onCallParticipant && (
+                <button
+                  type="button"
+                  className={styles.callButton}
+                  onClick={(e) => { e.stopPropagation(); onCallParticipant(p.clientId) }}
+                  title={`Call ${p.username ?? 'Anonymous'}`}
+                  aria-label={`Call ${p.username ?? 'Anonymous'}`}
+                >
+                  <IconPhone size={14} />
+                </button>
+              )}
             </li>
           ))}
         </ul>
