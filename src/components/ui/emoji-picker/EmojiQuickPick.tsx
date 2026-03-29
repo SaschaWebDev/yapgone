@@ -47,9 +47,11 @@ export function EmojiQuickPick({ onSelect, onClose, onExpand, recentEmojis, anch
     ? anchorRect.top - pickerHeight - 4
     : anchorRect.bottom + 4
 
-  const left = alignRight
-    ? anchorRect.right
-    : anchorRect.left
+  // Clamp horizontally within viewport (7 × 32px buttons + rem gaps/padding ≈ 274px)
+  const rem = parseFloat(getComputedStyle(document.documentElement).fontSize)
+  const pickerW = 7 * 32 + 6 * 0.15 * rem + 2 * 0.4 * rem + 0.35 * rem + 1
+  const idealLeft = alignRight ? anchorRect.right - pickerW : anchorRect.left
+  const left = Math.max(8, Math.min(idealLeft, window.innerWidth - pickerW - 8))
 
   return createPortal(
     <div
@@ -58,7 +60,7 @@ export function EmojiQuickPick({ onSelect, onClose, onExpand, recentEmojis, anch
       style={{
         position: 'fixed',
         top,
-        ...(alignRight ? { right: window.innerWidth - left } : { left }),
+        left,
       }}
     >
       {displayEmojis.map(emoji => (
