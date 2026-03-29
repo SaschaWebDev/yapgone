@@ -321,6 +321,16 @@
   cursor: not-allowed;
 }
 
+@media (max-width: 520px) {
+  .captionRow {
+    align-items: stretch;
+  }
+
+  .captionEmojiButton {
+    height: auto;
+  }
+}
+
 @keyframes fadeIn {
   from { opacity: 0 }
   to { opacity: 1 }

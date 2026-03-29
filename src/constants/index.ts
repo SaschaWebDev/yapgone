@@ -55,6 +55,12 @@ export const DEFAULT_TITLE = 'yapgone'
 
 export const VOICE_E2EE_ENABLED = true
 
+export const VOICE_VAD_THRESHOLD = 40
+export const VOICE_VAD_HOLD_MS = 150
+export const VOICE_ANALYSER_FFT_SIZE = 256
+export const VOICE_ANALYSER_SMOOTHING = 0.6
+export const VOICE_WAVEFORM_BAR_COUNT = 14
+
 export const MAX_GROUP_SIZE = 50
 export const DEFAULT_MAX_PARTICIPANTS = 2
 

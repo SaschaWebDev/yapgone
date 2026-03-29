@@ -268,6 +268,7 @@ function CreatorChat({
     onSignalRef: voiceHandlerRef,
     peerConnected: phase === 'ready',
     mediaKeyRaw,
+    myClientId,
   });
 
   return (
@@ -366,6 +367,7 @@ function JoinerChat({
     onSignalRef: voiceHandlerRef,
     peerConnected: phase === 'ready',
     mediaKeyRaw,
+    myClientId,
   });
 
   return (
@@ -437,7 +439,9 @@ interface VoiceState {
   isReconnecting: boolean;
   e2eeDowngradeRequested: boolean;
   e2eeDowngradeIncoming: boolean;
-  startCall: () => void;
+  localStream: MediaStream | null;
+  remoteStream: MediaStream | null;
+  startCall: (targetPeerId?: string) => void;
   acceptCall: () => Promise<void>;
   declineCall: () => void;
   endCall: () => void;
@@ -988,6 +992,12 @@ function ChatView({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     setUnreadBelow(0);
   }, []);
+
+  const handleImageLoad = useCallback(() => {
+    if (localSettings.autoScroll || isAtBottomRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [localSettings.autoScroll]);
 
   // Close local settings dropdown on outside click
   useEffect(() => {
@@ -1934,6 +1944,7 @@ function ChatView({
               pollAllowMultiple={msg.pollAllowMultiple}
               pollMyVotes={msg.pollMyVotes}
               resolveReactorName={resolveReactorName}
+              onImageLoad={handleImageLoad}
             />
           ))}
           <div ref={messagesEndRef} />
@@ -2241,6 +2252,8 @@ function ChatView({
           onStopScreenShare={voice.stopScreenShare}
           onAcceptE2eeDowngrade={voice.acceptE2eeDowngrade}
           onDeclineE2eeDowngrade={voice.declineE2eeDowngrade}
+          localStream={voice.localStream}
+          remoteStream={voice.remoteStream}
         />
       )}
       {voice.remoteScreenStream && (
@@ -2359,6 +2372,7 @@ function ChatView({
             onPollVote={isReady ? onPollVote : undefined}
             senderColor={msg.senderId ? senderColor(msg.senderId) : undefined}
             resolveReactorName={resolveReactorName}
+            onImageLoad={handleImageLoad}
           />
         ))}
         {peerTyping && (
@@ -2487,6 +2501,15 @@ function ChatView({
         <ParticipantList
           participants={buildParticipantsList()}
           onClose={() => setShowParticipantList(false)}
+          canCall={isReady && voice.callState === 'idle'}
+          onCallParticipant={(clientId) => {
+            setShowParticipantList(false);
+            if (!voice.privacyAcknowledged) {
+              setShowVoicePrivacyNotice(true);
+              return;
+            }
+            voice.startCall(clientId);
+          }}
         />
       )}
       {showSafetyNumber && myPubKeyRaw && peerPubKeys.size > 0 && (

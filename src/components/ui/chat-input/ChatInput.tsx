@@ -36,6 +36,7 @@ interface ChatInputProps {
 }
 
 const TYPING_TIMEOUT = 5_000;
+const MOBILE_MQ = '(max-width: 520px)';
 
 function formatRecordingTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -98,6 +99,18 @@ export function ChatInput({
   const emojiBtnRef = useRef<HTMLButtonElement>(null);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  const [timedMode, setTimedMode] = useState(false);
+
+  const [isMobile, setIsMobile] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia(MOBILE_MQ).matches,
+  );
+
+  useEffect(() => {
+    const mql = window.matchMedia(MOBILE_MQ);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
+  }, []);
 
   const handleEmojiSelect = useCallback((emoji: string) => {
     setEmojiPickerOpen(false);
@@ -133,6 +146,14 @@ export function ChatInput({
       textareaRef.current.focus();
     }
   }, [focusTrigger, canAutoFocus]);
+
+  // Auto-resize textarea to fit content (up to CSS max-height)
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [text]);
 
   useEffect(() => {
     return () => {
@@ -252,6 +273,7 @@ export function ChatInput({
     }
     setText('');
     textRef.current = '';
+    setTimedMode(false);
     if (isTypingRef.current) {
       isTypingRef.current = false;
       onTyping(false);
@@ -570,6 +592,7 @@ export function ChatInput({
                 onCameraCapture={onCameraCapture ? () => { cameraInputRef.current?.click(); setAttachMenuOpen(false) } : undefined}
                 onPollCreate={onOpenPollCreator ? () => { onOpenPollCreator(); setAttachMenuOpen(false) } : undefined}
                 onNotefadeCreate={onOpenNotefadeComposer ? () => { onOpenNotefadeComposer(); setAttachMenuOpen(false) } : undefined}
+                onEmojiSelect={isMobile ? () => { setEmojiPickerOpen(true); setAttachMenuOpen(false) } : undefined}
                 onClose={() => setAttachMenuOpen(false)}
               />
             )}
@@ -585,26 +608,38 @@ export function ChatInput({
         >
           <IconEmoji size={22} />
         </button>
-        {emojiPickerOpen && emojiBtnRef.current && (
+        {emojiPickerOpen && (emojiBtnRef.current || attachBtnRef.current) && (
           <EmojiFullPicker
             onSelect={handleEmojiSelect}
             onClose={() => setEmojiPickerOpen(false)}
             recentEmojis={recentEmojis ?? []}
-            anchorRect={emojiBtnRef.current.getBoundingClientRect()}
+            anchorRect={(emojiBtnRef.current && emojiBtnRef.current.offsetWidth > 0 ? emojiBtnRef.current : attachBtnRef.current!).getBoundingClientRect()}
           />
         )}
-        <textarea
-          ref={textareaRef}
-          className={styles.input}
-          value={text}
-          onChange={handleChange}
-          onKeyDown={handleKeyDown}
-          placeholder='Type a message'
-          disabled={disabled}
-          rows={1}
-          maxLength={maxLength}
-          aria-label='Message input'
-        />
+        <div className={styles.inputWrapper}>
+          <textarea
+            ref={textareaRef}
+            className={`${styles.input}${isMobile && !showMic && onSendTimed ? ` ${styles.inputHasTimedToggle}` : ''}`}
+            value={text}
+            onChange={handleChange}
+            onKeyDown={handleKeyDown}
+            placeholder='Type a message'
+            disabled={disabled}
+            rows={1}
+            maxLength={maxLength}
+            aria-label='Message input'
+          />
+          {isMobile && !showMic && onSendTimed && (
+            <button
+              type='button'
+              className={`${styles.timedToggle}${timedMode ? ` ${styles.timedToggleActive}` : ''}`}
+              onClick={() => setTimedMode(prev => !prev)}
+              aria-label={timedMode ? 'Disable timed message' : 'Enable timed message'}
+            >
+              <IconViewOnce size={20} />
+            </button>
+          )}
+        </div>
         {showMic ? (
           <button
             className={styles.micButton}
@@ -612,6 +647,18 @@ export function ChatInput({
             aria-label='Record voice note'
           >
             <IconMic size={30} />
+          </button>
+        ) : isMobile ? (
+          <button
+            className={styles.mobileSendButton}
+            onClick={() => handleSend(timedMode)}
+            disabled={disabled || !text.trim()}
+            aria-label={timedMode ? 'Send as timed message' : 'Send message'}
+          >
+            <svg width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
+              <line x1='22' y1='2' x2='11' y2='13' />
+              <polygon points='22 2 15 22 11 13 2 9 22 2' />
+            </svg>
           </button>
         ) : (
           <div className={styles.splitButton}>

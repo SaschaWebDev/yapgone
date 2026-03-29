@@ -339,6 +339,10 @@
 @media (max-width: 520px) {
   .messageList {
     padding: 0.75rem;
+    margin: 0 -1rem;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
   }
 }
 

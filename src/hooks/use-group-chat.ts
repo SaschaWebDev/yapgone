@@ -27,7 +27,7 @@ import type { GroupMemberCrypto } from '@/crypto/group-key-exchange'
 import { createReconnectingWebSocket } from '@/ws/reconnecting-client'
 import type { ReconnectingChatWebSocket } from '@/ws/reconnecting-client'
 import type { VoiceSignal } from '@/types'
-import { buildWsUrl, buildSplitInviteFragment, storeShard, updateRoomConfig } from '@/api'
+import { buildWsUrl, buildSplitInviteFragment, storeShard, fetchShard, isSplitInvite, updateRoomConfig } from '@/api'
 import { computeWaveform } from '@/utils'
 import type { RoomSettings } from '@/room-settings'
 import { DEFAULT_ROOM_SETTINGS, normalizeRoomSettings } from '@/room-settings'
@@ -74,7 +74,7 @@ export type ChatPhase =
   | 'room-closed'
   | 'error'
 
-type VoiceHandlerRef = RefObject<((signal: VoiceSignal) => void) | null>
+type VoiceHandlerRef = RefObject<((signal: VoiceSignal, senderId: string) => void) | null>
 
 const DecryptedPayloadSchema = z.discriminatedUnion('kind', [
   z.object({
@@ -1175,7 +1175,7 @@ export function useGroupChat(
           data.kind === 'e2ee-downgrade-request' || data.kind === 'e2ee-downgrade-accept' ||
           data.kind === 'e2ee-downgrade-decline'
         ) {
-          voiceHandlerRef?.current?.(data)
+          voiceHandlerRef?.current?.(data, senderId)
         }
         if (
           data.kind === 'voice-note-meta' ||
@@ -1253,6 +1253,13 @@ export function useGroupChat(
 
             // If joiner, resolve creator pubkey and do ECDH with first peer
             if (role === 'joiner' && creatorPubKeyOrShare) {
+              // If split invite, fetch server shard to trigger KV deletion
+              if (isSplitInvite(creatorPubKeyOrShare)) {
+                void fetchShard(roomId).catch(() => {
+                  // Shard may already be expired/deleted — not fatal for group chat
+                })
+              }
+
               // Joiners send their pubkey to all existing peers
               for (const peerId of clientIds) {
                 ws.send({
