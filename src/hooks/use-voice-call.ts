@@ -29,9 +29,10 @@ const IceCandidateInitSchema = z.object({
 
 interface UseVoiceCallOptions {
   sendSignal: (signal: VoiceSignal) => void
-  onSignalRef: RefObject<((signal: VoiceSignal) => void) | null>
+  onSignalRef: RefObject<((signal: VoiceSignal, senderId: string) => void) | null>
   peerConnected: boolean
   mediaKeyRaw: Uint8Array | null
+  myClientId: string | null
 }
 
 export type IceHandlingStrategy = 'buffer-pre-pc' | 'buffer-pre-remote' | 'apply-now'
@@ -76,6 +77,7 @@ export function useVoiceCall({
   onSignalRef,
   peerConnected,
   mediaKeyRaw,
+  myClientId,
 }: UseVoiceCallOptions) {
   const [callState, setCallState] = useState<CallState>('idle')
   const [isMuted, setIsMuted] = useState(false)
@@ -88,6 +90,8 @@ export function useVoiceCall({
   const [isReconnecting, setIsReconnecting] = useState(false)
   const [e2eeDowngradeRequested, setE2eeDowngradeRequested] = useState(false)
   const [e2eeDowngradeIncoming, setE2eeDowngradeIncoming] = useState(false)
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null)
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null)
 
   const pcRef = useRef<RTCPeerConnection | null>(null)
   const localStreamRef = useRef<MediaStream | null>(null)
@@ -173,6 +177,8 @@ export function useVoiceCall({
     setIsMuted(false)
     setIsDeafened(false)
     setCallDuration(0)
+    setLocalStream(null)
+    setRemoteStream(null)
     callStartRef.current = 0
     e2eeEnabledRef.current = VOICE_E2EE_ENABLED
     setIsE2eeEnabled(VOICE_E2EE_ENABLED)
@@ -211,6 +217,8 @@ export function useVoiceCall({
     setIsMuted(false)
     setIsDeafened(false)
     setCallDuration(0)
+    setLocalStream(null)
+    setRemoteStream(null)
     callStartRef.current = 0
     e2eeEnabledRef.current = VOICE_E2EE_ENABLED
     setIsE2eeEnabled(VOICE_E2EE_ENABLED)
@@ -349,8 +357,9 @@ export function useVoiceCall({
         remoteAudioRef.current = new Audio()
         remoteAudioRef.current.autoplay = true
       }
-      remoteAudioRef.current.srcObject =
-        event.streams[0] ?? new MediaStream([event.track])
+      const audioStream = event.streams[0] ?? new MediaStream([event.track])
+      remoteAudioRef.current.srcObject = audioStream
+      setRemoteStream(audioStream)
     }
 
     pc.oniceconnectionstatechange = () => {
@@ -420,6 +429,7 @@ export function useVoiceCall({
       },
     })
     localStreamRef.current = stream
+    setLocalStream(stream)
     return stream
   }, [])
 
@@ -438,9 +448,9 @@ export function useVoiceCall({
     await flushRemoteIceCandidates(pc)
   }, [flushRemoteIceCandidates])
 
-  const startCall = useCallback(() => {
+  const startCall = useCallback((targetPeerId?: string) => {
     if (stateRef.current !== 'idle') return
-    sendSignal({ kind: 'voice-request' })
+    sendSignal({ kind: 'voice-request', targetPeerId })
     setCallState('requesting')
   }, [sendSignal])
 
@@ -652,9 +662,11 @@ export function useVoiceCall({
     }
   }, [addTrackWithTransform, sendSignal, stopScreenShare])
 
-  const handleSignal = useCallback(async (signal: VoiceSignal) => {
+  const handleSignal = useCallback(async (signal: VoiceSignal, _senderId: string) => {
     switch (signal.kind) {
       case 'voice-request': {
+        // If the call targets a specific peer, ignore if it's not us
+        if (signal.targetPeerId && signal.targetPeerId !== myClientId) break
         if (_canEnterRingingOnIncoming(stateRef.current)) {
           clearConnectingTimeout()
           clearDisconnectedTimeout()
@@ -817,6 +829,7 @@ export function useVoiceCall({
     sendSignal,
     cleanupCall,
     softReconnect,
+    myClientId,
   ])
 
   // Register signal handler
@@ -868,6 +881,8 @@ export function useVoiceCall({
     isDeafened,
     isE2eeEnabled,
     isReconnecting,
+    localStream,
+    remoteStream,
     startCall,
     acceptCall,
     declineCall,

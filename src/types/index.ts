@@ -20,7 +20,7 @@ export type AppRoute =
   | { mode: 'chat'; roomId: string; creatorPubKey: string; roomSettings: RoomSettings | null }
 
 export type VoiceSignal =
-  | { kind: 'voice-request' }
+  | { kind: 'voice-request'; targetPeerId?: string }
   | { kind: 'voice-accept' }
   | { kind: 'voice-decline' }
   | { kind: 'sdp-offer'; sdp: string }
