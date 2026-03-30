@@ -278,8 +278,12 @@ export function ChatInput({
       isTypingRef.current = false;
       onTyping(false);
     }
-    textareaRef.current?.focus();
-  }, [text, disabled, onSend, onSendTimed, onTyping]);
+    if (isMobile) {
+      textareaRef.current?.blur();
+    } else {
+      textareaRef.current?.focus();
+    }
+  }, [text, disabled, onSend, onSendTimed, onTyping, isMobile]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
