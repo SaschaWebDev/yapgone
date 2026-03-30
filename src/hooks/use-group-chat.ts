@@ -75,6 +75,7 @@ export type ChatPhase =
   | 'error'
 
 type VoiceHandlerRef = RefObject<((signal: VoiceSignal, senderId: string) => void) | null>
+type GroupVoiceHandlerRef = RefObject<((signal: { kind: string; key?: string }, senderId: string) => void) | null>
 
 const DecryptedPayloadSchema = z.discriminatedUnion('kind', [
   z.object({
@@ -207,6 +208,9 @@ const DecryptedPayloadSchema = z.discriminatedUnion('kind', [
     chainKey: z.string().min(1),
   }),
   z.object({ kind: z.literal('rekey-request') }),
+  z.object({ kind: z.literal('group-voice-join') }),
+  z.object({ kind: z.literal('group-voice-leave') }),
+  z.object({ kind: z.literal('group-voice-key'), key: z.string().min(1) }),
 ])
 
 interface VoiceNoteAssembly {
@@ -265,6 +269,7 @@ export function useGroupChat(
   role: 'creator' | 'joiner',
   creatorPubKeyOrShare?: string,
   voiceHandlerRef?: VoiceHandlerRef,
+  groupVoiceHandlerRef?: GroupVoiceHandlerRef,
   initialRoomSettings?: RoomSettings | null,
 ) {
   const [phase, setPhase] = useState<ChatPhase>(role === 'creator' ? 'creating' : 'connecting')
@@ -1050,6 +1055,31 @@ export function useGroupChat(
         setPhase(prev => prev === 'key-exchange' || prev === 'waiting' ? 'ready' : prev)
         return
       }
+
+      // Group voice key delivery (pairwise-encrypted)
+      const DirectGroupVoiceKeySchema = z.object({
+        type: z.literal('group-voice-key-delivery'),
+        header: z.object({ pubkey: z.string(), n: z.number(), pn: z.number() }),
+        payload: z.string(),
+      })
+      const voiceKeyResult = DirectGroupVoiceKeySchema.safeParse(parsed)
+      if (voiceKeyResult.success) {
+        const { header, payload: encPayload } = voiceKeyResult.data
+        const ratchet = gc.pairwiseRatchets.get(senderId)
+        if (!ratchet) return
+        try {
+          const encBytes = fromBase64Url(encPayload)
+          const iv = encBytes.slice(0, 12)
+          const ciphertext = encBytes.slice(12)
+          const { state: newRatchet, plaintext } = await ratchetDecrypt(ratchet, header, iv, ciphertext)
+          const newPairwise = new Map(gc.pairwiseRatchets)
+          newPairwise.set(senderId, newRatchet)
+          groupCryptoRef.current = { ...gc, pairwiseRatchets: newPairwise }
+          const decrypted = JSON.parse(new TextDecoder().decode(plaintext))
+          groupVoiceHandlerRef?.current?.({ kind: 'group-voice-key', key: decrypted.key }, senderId)
+        } catch { /* invalid voice key — ignore */ }
+        return
+      }
     }
 
     async function distributeSenderKeyToAll() {
@@ -1176,6 +1206,12 @@ export function useGroupChat(
           data.kind === 'e2ee-downgrade-decline'
         ) {
           voiceHandlerRef?.current?.(data, senderId)
+        } else if (
+          data.kind === 'group-voice-join' ||
+          data.kind === 'group-voice-leave' ||
+          data.kind === 'group-voice-key'
+        ) {
+          groupVoiceHandlerRef?.current?.(data, senderId)
         }
         if (
           data.kind === 'voice-note-meta' ||
@@ -1470,6 +1506,42 @@ export function useGroupChat(
     await encryptAndSend(signalRecord)
   }, [encryptAndSend])
 
+  const sendGroupVoiceSignal = useCallback(async (signal: Record<string, unknown>) => {
+    if (!groupCryptoRef.current || !wsRef.current) return
+    await encryptAndSend(signal)
+  }, [encryptAndSend])
+
+  const sendDirectEncrypted = useCallback(async (targetId: string, payload: Record<string, unknown>) => {
+    const gc = groupCryptoRef.current
+    const ws = wsRef.current
+    if (!gc || !ws) return
+    const ratchet = gc.pairwiseRatchets.get(targetId)
+    if (!ratchet) return
+    const plaintext = new TextEncoder().encode(JSON.stringify(payload))
+    const { state: newRatchet, header, iv, ciphertext } = await ratchetEncrypt(ratchet, plaintext)
+    const newPairwise = new Map(gc.pairwiseRatchets)
+    newPairwise.set(targetId, newRatchet)
+    groupCryptoRef.current = { ...gc, pairwiseRatchets: newPairwise }
+    ws.send({
+      type: 'direct',
+      targetId,
+      payload: JSON.stringify({
+        type: 'group-voice-key-delivery',
+        header,
+        payload: toBase64Url(concatBytes(iv, ciphertext)),
+      }),
+    })
+  }, [])
+
+  const sendBinaryFrame = useCallback((data: ArrayBuffer) => {
+    wsRef.current?.sendBinary(data)
+  }, [])
+
+  const setOnBinaryMessage = useCallback((handler: ((data: ArrayBuffer) => void) | null) => {
+    const ws = wsRef.current
+    if (ws) ws.onBinaryMessage = handler
+  }, [])
+
   const sendVoiceNote = useCallback(async (
     blob: Blob,
     durationMs: number,
@@ -1727,5 +1799,9 @@ export function useGroupChat(
     myClientId,
     myPubKeyRaw,
     peerPubKeys: peerPubKeysMap,
+    sendGroupVoiceSignal,
+    sendDirectEncrypted,
+    sendBinaryFrame,
+    setOnBinaryMessage,
   }
 }

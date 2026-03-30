@@ -12,6 +12,7 @@ import chatBubbleStyles from '@/components/ui/message-bubble/MessageBubble.modul
 import {
   useGroupChat,
   useVoiceCall,
+  useGroupVoice,
   useNotifications,
   useLocalChatSettings,
   useInactivityTimer,
@@ -57,6 +58,7 @@ import {
   NotefadeComposer,
   SafetyNumber,
   ParticipantList,
+  GroupVoiceControls,
 } from '@/components';
 import {
   MAX_MESSAGE_LENGTH,
@@ -219,7 +221,8 @@ function CreatorChat({
   roomId: string;
   initialRoomSettings: RoomSettings;
 }) {
-  const voiceHandlerRef = useRef<((signal: VoiceSignal) => void) | null>(null);
+  const voiceHandlerRef = useRef<((signal: VoiceSignal, senderId: string) => void) | null>(null);
+  const groupVoiceHandlerRef = useRef<((signal: { kind: string; key?: string }, senderId: string) => void) | null>(null);
   const {
     phase,
     messages,
@@ -255,11 +258,16 @@ function CreatorChat({
     peerUsernames,
     myPubKeyRaw,
     peerPubKeys,
+    sendGroupVoiceSignal,
+    sendDirectEncrypted,
+    sendBinaryFrame,
+    setOnBinaryMessage,
   } = useGroupChat(
     roomId,
     'creator',
     undefined,
     voiceHandlerRef,
+    groupVoiceHandlerRef,
     initialRoomSettings,
   );
 
@@ -269,6 +277,16 @@ function CreatorChat({
     peerConnected: phase === 'ready',
     mediaKeyRaw,
     myClientId,
+  });
+
+  const groupVoice = useGroupVoice({
+    myClientId,
+    peerIds: [...peerPubKeys.keys()],
+    sendGroupVoiceSignal,
+    sendDirectEncrypted,
+    sendBinaryFrame,
+    setOnBinaryMessage,
+    groupVoiceHandlerRef,
   });
 
   return (
@@ -302,6 +320,7 @@ function CreatorChat({
       peerUsername={peerUsername}
       onSetLocalUsername={setLocalUsername}
       voice={voice}
+      groupVoice={groupVoice}
       participantCount={participantCount}
       myClientId={myClientId}
       peerUsernames={peerUsernames}
@@ -320,7 +339,8 @@ function JoinerChat({
   creatorPubKey: string;
   initialRoomSettings: RoomSettings;
 }) {
-  const voiceHandlerRef = useRef<((signal: VoiceSignal) => void) | null>(null);
+  const voiceHandlerRef = useRef<((signal: VoiceSignal, senderId: string) => void) | null>(null);
+  const groupVoiceHandlerRef = useRef<((signal: { kind: string; key?: string }, senderId: string) => void) | null>(null);
   const {
     phase,
     messages,
@@ -354,11 +374,16 @@ function JoinerChat({
     peerUsernames,
     myPubKeyRaw,
     peerPubKeys,
+    sendGroupVoiceSignal,
+    sendDirectEncrypted,
+    sendBinaryFrame,
+    setOnBinaryMessage,
   } = useGroupChat(
     roomId,
     'joiner',
     creatorPubKey,
     voiceHandlerRef,
+    groupVoiceHandlerRef,
     initialRoomSettings,
   );
 
@@ -368,6 +393,16 @@ function JoinerChat({
     peerConnected: phase === 'ready',
     mediaKeyRaw,
     myClientId,
+  });
+
+  const groupVoice = useGroupVoice({
+    myClientId,
+    peerIds: [...peerPubKeys.keys()],
+    sendGroupVoiceSignal,
+    sendDirectEncrypted,
+    sendBinaryFrame,
+    setOnBinaryMessage,
+    groupVoiceHandlerRef,
   });
 
   return (
@@ -401,6 +436,7 @@ function JoinerChat({
       peerUsername={peerUsername}
       onSetLocalUsername={setLocalUsername}
       voice={voice}
+      groupVoice={groupVoice}
       participantCount={participantCount}
       myClientId={myClientId}
       peerUsernames={peerUsernames}
@@ -500,6 +536,14 @@ interface ChatViewProps {
   peerUsername: string | null;
   onSetLocalUsername: (username: string) => Promise<void>;
   voice: VoiceState;
+  groupVoice?: {
+    isInGroupVoice: boolean;
+    isMuted: boolean;
+    voiceParticipants: Set<string>;
+    joinGroupVoice: () => Promise<void>;
+    leaveGroupVoice: () => Promise<void>;
+    toggleMute: () => void;
+  };
   participantCount: number;
   myClientId: string | null;
   peerUsernames: Map<string, string | null>;
@@ -537,6 +581,7 @@ function ChatView({
   peerUsername,
   onSetLocalUsername,
   voice,
+  groupVoice,
   participantCount,
   myClientId,
   peerUsernames,
@@ -2254,6 +2299,16 @@ function ChatView({
           onDeclineE2eeDowngrade={voice.declineE2eeDowngrade}
           localStream={voice.localStream}
           remoteStream={voice.remoteStream}
+        />
+      )}
+      {isReady && groupVoice && participantCount >= 3 && (
+        <GroupVoiceControls
+          isInGroupVoice={groupVoice.isInGroupVoice}
+          isMuted={groupVoice.isMuted}
+          voiceParticipants={groupVoice.voiceParticipants}
+          onJoin={groupVoice.joinGroupVoice}
+          onLeave={groupVoice.leaveGroupVoice}
+          onToggleMute={groupVoice.toggleMute}
         />
       )}
       {voice.remoteScreenStream && (

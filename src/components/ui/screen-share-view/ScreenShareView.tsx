@@ -29,11 +29,11 @@ export function ScreenShareView({ stream }: ScreenShareViewProps) {
     }
   }, [stream, isFullscreen])
 
-  const handleDoubleClick = useCallback((e: React.MouseEvent) => {
+  const handleDoubleClick = useCallback(() => {
     if (window.matchMedia(MOBILE_MQ).matches) {
       setIsFullscreen(prev => !prev)
     } else {
-      draggable.onDoubleClick(e)
+      draggable.onDoubleClick()
     }
   }, [draggable])
 
