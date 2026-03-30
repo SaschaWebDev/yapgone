@@ -5,6 +5,7 @@ const DEFAULT_MAX_CLIENTS = 50
 const INACTIVITY_TTL_MS = 30 * 60 * 1000
 const MAX_MESSAGE_SIZE = 32768
 const MAX_MESSAGES_PER_SECOND = 60
+const VOICE_MAGIC_BYTE = 0xAA
 
 const SERVER_RESERVED_TYPES = new Set([
   'peer-joined', 'peer-left', 'peer-list', 'room-full', 'room-expired', 'room-closed', 'error',
@@ -194,6 +195,19 @@ export class ChatRoom extends DurableObject {
         }
       } catch {
         ws.send(JSON.stringify({ type: 'error', code: 'INVALID_JSON', message: 'Invalid JSON' }))
+        return
+      }
+    }
+
+    // Binary voice frames: bypass rate limiting and broadcast immediately
+    if (message instanceof ArrayBuffer && message.byteLength > 0) {
+      const firstByte = new Uint8Array(message, 0, 1)[0]
+      if (firstByte === VOICE_MAGIC_BYTE) {
+        for (const peer of this.ctx.getWebSockets()) {
+          if (peer !== ws) {
+            try { peer.send(message) } catch { /* disconnected */ }
+          }
+        }
         return
       }
     }

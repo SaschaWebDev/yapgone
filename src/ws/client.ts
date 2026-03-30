@@ -4,10 +4,12 @@ import { ClientMessageSchema, ServerMessageSchema } from './protocol'
 export interface ChatWebSocket {
   connect(url: string): void
   send(message: ClientMessage): void
+  sendBinary(data: ArrayBuffer): void
   close(): void
   readonly readyState: number
   onOpen: (() => void) | null
   onMessage: ((message: ServerMessage | ClientMessage) => void) | null
+  onBinaryMessage: ((data: ArrayBuffer) => void) | null
   onClose: ((code: number, reason: string) => void) | null
   onError: ((error: unknown) => void) | null
 }
@@ -22,17 +24,23 @@ export function createWebSocket(): ChatWebSocket {
 
     onOpen: null,
     onMessage: null,
+    onBinaryMessage: null,
     onClose: null,
     onError: null,
 
     connect(url: string) {
       ws = new WebSocket(url)
+      ws.binaryType = 'arraybuffer'
 
       ws.onopen = () => {
         socket.onOpen?.()
       }
 
       ws.onmessage = (event: MessageEvent) => {
+        if (event.data instanceof ArrayBuffer) {
+          socket.onBinaryMessage?.(event.data)
+          return
+        }
         if (typeof event.data !== 'string') return
         try {
           const json: unknown = JSON.parse(event.data)
@@ -66,6 +74,12 @@ export function createWebSocket(): ChatWebSocket {
     send(message: ClientMessage) {
       if (ws?.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify(message))
+      }
+    },
+
+    sendBinary(data: ArrayBuffer) {
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(data)
       }
     },
 

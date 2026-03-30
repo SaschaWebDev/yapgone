@@ -34,6 +34,7 @@ export function createReconnectingWebSocket(): ReconnectingChatWebSocket {
 
     onOpen: null,
     onMessage: null,
+    onBinaryMessage: null,
     onClose: null,
     onError: null,
     onReconnecting: null,
@@ -53,6 +54,11 @@ export function createReconnectingWebSocket(): ReconnectingChatWebSocket {
       // During reconnection, silently drop messages
       if (reconnecting) return
       inner.send(message)
+    },
+
+    sendBinary(data: ArrayBuffer) {
+      if (reconnecting) return
+      inner.sendBinary(data)
     },
 
     close() {
@@ -87,6 +93,10 @@ export function createReconnectingWebSocket(): ReconnectingChatWebSocket {
 
     ws.onMessage = (msg: ServerMessage | ClientMessage) => {
       socket.onMessage?.(msg)
+    }
+
+    ws.onBinaryMessage = (data: ArrayBuffer) => {
+      socket.onBinaryMessage?.(data)
     }
 
     ws.onClose = (code: number, reason: string) => {
