@@ -34,6 +34,11 @@ export type VoiceSignal =
   | { kind: 'e2ee-downgrade-accept' }
   | { kind: 'e2ee-downgrade-decline' }
 
+export type GroupVoiceSignal =
+  | { kind: 'group-voice-join' }
+  | { kind: 'group-voice-leave' }
+  | { kind: 'group-voice-key'; key: string }
+
 export type CallState =
   | 'idle'
   | 'requesting'
