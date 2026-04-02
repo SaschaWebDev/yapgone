@@ -19,4 +19,3 @@ export type {
   PollOption,
   GalleryImage,
 } from './chat-helpers'
-export { senderColor } from './chat-helpers'

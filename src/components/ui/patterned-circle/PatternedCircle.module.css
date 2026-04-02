@@ -1,0 +1,8 @@
+.circle {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background-repeat: repeat;
+}

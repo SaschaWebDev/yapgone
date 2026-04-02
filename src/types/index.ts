@@ -29,6 +29,8 @@ export type VoiceSignal =
   | { kind: 'voice-end' }
   | { kind: 'screen-share-start' }
   | { kind: 'screen-share-stop' }
+  | { kind: 'video-start' }
+  | { kind: 'video-stop' }
   | { kind: 'e2ee-toggle'; e2ee: boolean }
   | { kind: 'e2ee-downgrade-request' }
   | { kind: 'e2ee-downgrade-accept' }

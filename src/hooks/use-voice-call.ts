@@ -85,6 +85,9 @@ export function useVoiceCall({
   const [privacyAcknowledged, setPrivacyAcknowledged] = useState(false)
   const [isScreenSharing, setIsScreenSharing] = useState(false)
   const [remoteScreenStream, setRemoteScreenStream] = useState<MediaStream | null>(null)
+  const [isVideoEnabled, setIsVideoEnabled] = useState(false)
+  const [localVideoStream, setLocalVideoStream] = useState<MediaStream | null>(null)
+  const [remoteVideoStream, setRemoteVideoStream] = useState<MediaStream | null>(null)
   const [isDeafened, setIsDeafened] = useState(false)
   const [isE2eeEnabled, setIsE2eeEnabled] = useState(VOICE_E2EE_ENABLED)
   const [isReconnecting, setIsReconnecting] = useState(false)
@@ -108,6 +111,9 @@ export function useVoiceCall({
   const mediaWorkersRef = useRef<Array<{ worker: Worker; cleanup: () => void }>>([])
   const screenStreamRef = useRef<MediaStream | null>(null)
   const screenSenderRef = useRef<RTCRtpSender | null>(null)
+  const videoStreamRef = useRef<MediaStream | null>(null)
+  const videoSenderRef = useRef<RTCRtpSender | null>(null)
+  const peerVideoActiveRef = useRef(false)
   const mediaKeyRawRef = useRef<Uint8Array | null>(mediaKeyRaw)
   const e2eeEnabledRef = useRef(VOICE_E2EE_ENABLED)
   const reconnectingRef = useRef(false)
@@ -147,6 +153,18 @@ export function useVoiceCall({
     setRemoteScreenStream(null)
   }, [])
 
+  const cleanupVideo = useCallback(() => {
+    if (videoStreamRef.current) {
+      videoStreamRef.current.getTracks().forEach(t => t.stop())
+      videoStreamRef.current = null
+    }
+    videoSenderRef.current = null
+    peerVideoActiveRef.current = false
+    setIsVideoEnabled(false)
+    setLocalVideoStream(null)
+    setRemoteVideoStream(null)
+  }, [])
+
   const failCall = useCallback((notifyPeer: boolean) => {
     if (notifyPeer) {
       sendSignal({ kind: 'voice-end' })
@@ -162,6 +180,7 @@ export function useVoiceCall({
       localStreamRef.current = null
     }
     cleanupScreenShare()
+    cleanupVideo()
     terminateMediaWorkers()
     if (pcRef.current) {
       pcRef.current.close()
@@ -188,7 +207,7 @@ export function useVoiceCall({
     setE2eeDowngradeRequested(false)
     setE2eeDowngradeIncoming(false)
     setCallState('failed')
-  }, [sendSignal, clearConnectingTimeout, clearDisconnectedTimeout, cleanupScreenShare, terminateMediaWorkers])
+  }, [sendSignal, clearConnectingTimeout, clearDisconnectedTimeout, cleanupScreenShare, cleanupVideo, terminateMediaWorkers])
 
   const cleanupCall = useCallback(() => {
     clearConnectingTimeout()
@@ -202,6 +221,7 @@ export function useVoiceCall({
       localStreamRef.current = null
     }
     cleanupScreenShare()
+    cleanupVideo()
     terminateMediaWorkers()
     if (pcRef.current) {
       pcRef.current.close()
@@ -227,7 +247,7 @@ export function useVoiceCall({
     e2eeDowngradeRequestedRef.current = false
     setE2eeDowngradeRequested(false)
     setE2eeDowngradeIncoming(false)
-  }, [clearConnectingTimeout, clearDisconnectedTimeout, cleanupScreenShare, terminateMediaWorkers])
+  }, [clearConnectingTimeout, clearDisconnectedTimeout, cleanupScreenShare, cleanupVideo, terminateMediaWorkers])
 
   const startDurationTimer = useCallback(() => {
     callStartRef.current = Date.now()
@@ -345,9 +365,16 @@ export function useVoiceCall({
 
       if (event.track.kind === 'video') {
         const stream = event.streams[0] ?? new MediaStream([event.track])
-        setRemoteScreenStream(stream)
-        event.track.onended = () => {
-          setRemoteScreenStream(null)
+        if (peerVideoActiveRef.current) {
+          setRemoteVideoStream(stream)
+          event.track.onended = () => {
+            setRemoteVideoStream(null)
+          }
+        } else {
+          setRemoteScreenStream(stream)
+          event.track.onended = () => {
+            setRemoteScreenStream(null)
+          }
         }
         return
       }
@@ -514,6 +541,15 @@ export function useVoiceCall({
       setIsScreenSharing(false)
     }
 
+    // Stop video if active
+    if (videoStreamRef.current) {
+      videoStreamRef.current.getTracks().forEach(t => t.stop())
+      videoStreamRef.current = null
+      videoSenderRef.current = null
+      setIsVideoEnabled(false)
+      setLocalVideoStream(null)
+    }
+
     // Terminate media workers
     terminateMediaWorkers()
 
@@ -662,6 +698,77 @@ export function useVoiceCall({
     }
   }, [addTrackWithTransform, sendSignal, stopScreenShare])
 
+  const stopVideo = useCallback(() => {
+    const pc = pcRef.current
+    const sender = videoSenderRef.current
+    if (pc && sender) {
+      pc.removeTrack(sender)
+      void (async () => {
+        try {
+          const offer = await pc.createOffer()
+          await pc.setLocalDescription(offer)
+          sendSignal({ kind: 'sdp-offer', sdp: JSON.stringify(offer) })
+        } catch {
+          // non-fatal
+        }
+      })()
+    }
+    if (videoStreamRef.current) {
+      videoStreamRef.current.getTracks().forEach(t => t.stop())
+      videoStreamRef.current = null
+    }
+    videoSenderRef.current = null
+    setIsVideoEnabled(false)
+    setLocalVideoStream(null)
+    sendSignal({ kind: 'video-stop' })
+  }, [sendSignal])
+
+  const startVideo = useCallback(async () => {
+    const pc = pcRef.current
+    if (!pc || stateRef.current !== 'active') return
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          frameRate: { ideal: 24, max: 30 },
+        },
+      })
+      videoStreamRef.current = stream
+      const videoTrack = stream.getVideoTracks()[0]
+      if (!videoTrack) {
+        stream.getTracks().forEach(t => t.stop())
+        return
+      }
+      videoTrack.onended = () => {
+        stopVideo()
+      }
+      const sender = addTrackWithTransform(pc, videoTrack, stream)
+      videoSenderRef.current = sender
+      try {
+        const params = sender.getParameters()
+        if (!params.encodings) params.encodings = [{}]
+        const encoding = params.encodings[0]
+        if (encoding) {
+          encoding.maxBitrate = 1_500_000
+          encoding.maxFramerate = 30
+        }
+        await sender.setParameters(params)
+      } catch { /* non-fatal */ }
+      const offer = await pc.createOffer()
+      await pc.setLocalDescription(offer)
+      sendSignal({ kind: 'sdp-offer', sdp: JSON.stringify(offer) })
+      setIsVideoEnabled(true)
+      setLocalVideoStream(stream)
+      sendSignal({ kind: 'video-start' })
+    } catch {
+      if (videoStreamRef.current) {
+        videoStreamRef.current.getTracks().forEach(t => t.stop())
+        videoStreamRef.current = null
+      }
+    }
+  }, [addTrackWithTransform, sendSignal, stopVideo])
+
   const handleSignal = useCallback(async (signal: VoiceSignal, _senderId: string) => {
     switch (signal.kind) {
       case 'voice-request': {
@@ -778,6 +885,17 @@ export function useVoiceCall({
 
       case 'screen-share-stop': {
         setRemoteScreenStream(null)
+        break
+      }
+
+      case 'video-start': {
+        peerVideoActiveRef.current = true
+        break
+      }
+
+      case 'video-stop': {
+        peerVideoActiveRef.current = false
+        setRemoteVideoStream(null)
         break
       }
 
@@ -898,5 +1016,10 @@ export function useVoiceCall({
     resetCallState,
     startScreenShare,
     stopScreenShare,
+    isVideoEnabled,
+    localVideoStream,
+    remoteVideoStream,
+    startVideo,
+    stopVideo,
   }
 }
