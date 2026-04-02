@@ -87,13 +87,6 @@
   background: var(--bg-elevated);
 }
 
-.circle {
-  width: 0.6rem;
-  height: 0.6rem;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
 .name {
   font-size: 0.875rem;
   color: var(--text-primary);
@@ -108,15 +101,22 @@
   flex-shrink: 0;
 }
 
-.callButton {
+.callActions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.callButton,
+.videoCallButton {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 1.6rem;
   height: 1.6rem;
-  margin-left: auto;
   flex-shrink: 0;
-  background: var(--success);
   color: #fff;
   border: none;
   border-radius: 50%;
@@ -124,7 +124,16 @@
   transition: opacity 0.12s;
 }
 
-.callButton:hover {
+.callButton {
+  background: var(--success);
+}
+
+.videoCallButton {
+  background: #5D9ECC;
+}
+
+.callButton:hover,
+.videoCallButton:hover {
   opacity: 0.85;
 }
 

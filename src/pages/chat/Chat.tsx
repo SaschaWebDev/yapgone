@@ -3,9 +3,11 @@ import {
   useEffect,
   useState,
   useCallback,
+  useMemo,
   type FormEvent,
 } from 'react';
 import { computeWaveform } from '@/utils';
+import { buildIdentityMap } from '@/utils/sender-identity';
 import { createNotefadeNote, readNotefadeNote } from '@/api';
 import { generateSafeWord, encryptForNotefade, decryptFromNotefade, deriveNotefadeKeyB64, BYOK_DELIMITER } from '@/crypto';
 import chatBubbleStyles from '@/components/ui/message-bubble/MessageBubble.module.css';
@@ -17,7 +19,6 @@ import {
   useLocalChatSettings,
   useInactivityTimer,
   useRecentEmojis,
-  senderColor,
   playSendSound,
   unlockAudio,
 } from '@/hooks';
@@ -42,6 +43,7 @@ import {
   StatusBadge,
   VoiceControls,
   ScreenShareView,
+  VideoView,
   IconCopy,
   IconCheck,
   IconGear,
@@ -490,6 +492,11 @@ interface VoiceState {
   resetCallState: () => void;
   startScreenShare: () => Promise<void>;
   stopScreenShare: () => void;
+  isVideoEnabled: boolean;
+  localVideoStream: MediaStream | null;
+  remoteVideoStream: MediaStream | null;
+  startVideo: () => Promise<void>;
+  stopVideo: () => void;
 }
 
 interface ChatViewProps {
@@ -719,6 +726,13 @@ function ChatView({
     return list;
   }, [myClientId, localUsername, peerUsernames, peerPubKeys]);
 
+  const identityMap = useMemo(() => {
+    const ids: string[] = [];
+    if (myClientId) ids.push(myClientId);
+    for (const [id] of peerPubKeys) ids.push(id);
+    return buildIdentityMap(ids);
+  }, [myClientId, peerPubKeys]);
+
   const resolveReactorName = useCallback(
     (reaction: MessageReaction): string => {
       if (reaction.fromSelf) return 'You';
@@ -746,6 +760,15 @@ function ChatView({
       setShowVoicePrivacyNotice(false);
     }
   }, [voice.callState]);
+
+  // Auto-start video after call connects (triggered by video call button)
+  const pendingVideoRef = useRef(false);
+  useEffect(() => {
+    if (pendingVideoRef.current && voice.callState === 'active') {
+      pendingVideoRef.current = false;
+      void voice.startVideo();
+    }
+  }, [voice.callState, voice.startVideo]);
 
   // Wrap onTyping to also reset inactivity timer
   const handleTyping = useCallback(
@@ -2295,6 +2318,9 @@ function ChatView({
           onResetCallState={voice.resetCallState}
           onStartScreenShare={voice.startScreenShare}
           onStopScreenShare={voice.stopScreenShare}
+          isVideoEnabled={voice.isVideoEnabled}
+          onStartVideo={voice.startVideo}
+          onStopVideo={voice.stopVideo}
           onAcceptE2eeDowngrade={voice.acceptE2eeDowngrade}
           onDeclineE2eeDowngrade={voice.declineE2eeDowngrade}
           localStream={voice.localStream}
@@ -2313,6 +2339,12 @@ function ChatView({
       )}
       {voice.remoteScreenStream && (
         <ScreenShareView stream={voice.remoteScreenStream} />
+      )}
+      {voice.remoteVideoStream && (
+        <VideoView
+          remoteStream={voice.remoteVideoStream}
+          localStream={voice.localVideoStream}
+        />
       )}
       <div
         ref={messageListRef}
@@ -2425,7 +2457,7 @@ function ChatView({
             onRevealNotefade={handleRevealNotefade}
             onDestroyNotefade={handleDestroyNotefade}
             onPollVote={isReady ? onPollVote : undefined}
-            senderColor={msg.senderId ? senderColor(msg.senderId) : undefined}
+            senderColor={msg.senderId ? identityMap.get(msg.senderId)?.color : undefined}
             resolveReactorName={resolveReactorName}
             onImageLoad={handleImageLoad}
           />
@@ -2555,6 +2587,7 @@ function ChatView({
       {showParticipantList && myClientId && (
         <ParticipantList
           participants={buildParticipantsList()}
+          identityMap={identityMap}
           onClose={() => setShowParticipantList(false)}
           canCall={isReady && voice.callState === 'idle'}
           onCallParticipant={(clientId) => {
@@ -2563,6 +2596,15 @@ function ChatView({
               setShowVoicePrivacyNotice(true);
               return;
             }
+            voice.startCall(clientId);
+          }}
+          onVideoCallParticipant={(clientId) => {
+            setShowParticipantList(false);
+            if (!voice.privacyAcknowledged) {
+              setShowVoicePrivacyNotice(true);
+              return;
+            }
+            pendingVideoRef.current = true;
             voice.startCall(clientId);
           }}
         />

@@ -6,6 +6,7 @@ import {
   IconPhone,
   IconMic,
   IconMicOff,
+  IconCamera,
   IconScreenShare,
   IconScreenShareOff,
   IconSpeaker,
@@ -42,6 +43,9 @@ interface VoiceControlsProps {
   onResetCallState: () => void;
   onStartScreenShare: () => void;
   onStopScreenShare: () => void;
+  isVideoEnabled: boolean;
+  onStartVideo: () => void;
+  onStopVideo: () => void;
   onAcceptE2eeDowngrade: () => void;
   onDeclineE2eeDowngrade: () => void;
   localStream: MediaStream | null;
@@ -76,6 +80,9 @@ export function VoiceControls({
   onResetCallState,
   onStartScreenShare,
   onStopScreenShare,
+  isVideoEnabled,
+  onStartVideo,
+  onStopVideo,
   onAcceptE2eeDowngrade: _onAcceptE2eeDowngrade,
   onDeclineE2eeDowngrade: _onDeclineE2eeDowngrade,
   localStream,
@@ -400,6 +407,18 @@ export function VoiceControls({
           )}
         </button>
         <AudioWaveform analyserRef={remoteAnalyserRef} muted={isDeafened} />
+        <button
+          className={
+            isVideoEnabled
+              ? styles.videoActiveButton
+              : styles.videoButton
+          }
+          onClick={isVideoEnabled ? onStopVideo : onStartVideo}
+          title={isVideoEnabled ? 'Turn off camera' : 'Turn on camera'}
+          aria-label={isVideoEnabled ? 'Turn off camera' : 'Turn on camera'}
+        >
+          <IconCamera size={21} />
+        </button>
         {typeof navigator !== 'undefined' &&
           navigator.mediaDevices &&
           typeof navigator.mediaDevices.getDisplayMedia === 'function' && (
