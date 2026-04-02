@@ -300,16 +300,3 @@ export function concatChunks(chunks: Uint8Array[]): Uint8Array {
   }
   return output
 }
-
-/**
- * Generate a deterministic color from a sender ID (e.g., clientId or pubkey hash).
- * Returns an HSL color string for use in UI.
- */
-export function senderColor(senderId: string): string {
-  let hash = 0
-  for (let i = 0; i < senderId.length; i++) {
-    hash = ((hash << 5) - hash + senderId.charCodeAt(i)) | 0
-  }
-  const hue = Math.abs(hash) % 360
-  return `hsl(${hue}, 65%, 55%)`
-}
