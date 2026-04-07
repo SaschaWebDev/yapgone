@@ -2021,8 +2021,22 @@ function ChatView({
               }
               onDownload={
                 (msg.kind === 'audio' && msg.audioUrl) ||
-                ((msg.kind === 'image' || msg.kind === 'file') && msg.fileUrl)
+                ((msg.kind === 'image' ||
+                  msg.kind === 'video' ||
+                  msg.kind === 'file') &&
+                  msg.fileUrl) ||
+                (msg.kind === 'gallery' && msg.gallery && msg.gallery.length > 0)
                   ? () => {
+                      if (msg.kind === 'gallery' && msg.gallery) {
+                        msg.gallery.forEach((img, i) => {
+                          if (!img.fileUrl) return;
+                          const a = document.createElement('a');
+                          a.href = img.fileUrl;
+                          a.download = img.fileName ?? `photo-${Date.now()}-${i + 1}`;
+                          a.click();
+                        });
+                        return;
+                      }
                       const url = msg.audioUrl ?? msg.fileUrl;
                       if (!url) return;
                       const a = document.createElement('a');
@@ -2470,10 +2484,26 @@ function ChatView({
               (msg.kind === 'audio' &&
                 msg.audioUrl &&
                 !(msg.timed && msg.sender === 'peer')) ||
-              ((msg.kind === 'image' || msg.kind === 'file') &&
+              ((msg.kind === 'image' ||
+                msg.kind === 'video' ||
+                msg.kind === 'file') &&
                 msg.fileUrl &&
+                !(msg.timed && msg.sender === 'peer')) ||
+              (msg.kind === 'gallery' &&
+                msg.gallery &&
+                msg.gallery.length > 0 &&
                 !(msg.timed && msg.sender === 'peer'))
                 ? () => {
+                    if (msg.kind === 'gallery' && msg.gallery) {
+                      msg.gallery.forEach((img, i) => {
+                        if (!img.fileUrl) return;
+                        const a = document.createElement('a');
+                        a.href = img.fileUrl;
+                        a.download = img.fileName ?? `photo-${Date.now()}-${i + 1}`;
+                        a.click();
+                      });
+                      return;
+                    }
                     const url = msg.audioUrl ?? msg.fileUrl;
                     if (!url) return;
                     const a = document.createElement('a');

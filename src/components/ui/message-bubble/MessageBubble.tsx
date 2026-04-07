@@ -1377,7 +1377,7 @@ export function MessageBubble({
             ) : null}
             <div className={styles.videoFooter}>
               {fileName && (
-                <span className={styles.videoFileName}>{fileName}</span>
+                <span className={styles.videoFileName} title={fileName}>{fileName}</span>
               )}
               <time
                 className={styles.time}
