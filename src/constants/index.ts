@@ -11,6 +11,7 @@ export const VOICE_NOTE_ASSEMBLY_TIMEOUT_MS = 60_000
 
 export const FILE_MAX_IMAGE_BYTES = 5 * 1024 * 1024    // 5 MiB
 export const FILE_MAX_GENERAL_BYTES = 10 * 1024 * 1024  // 10 MiB
+export const FILE_MAX_VIDEO_BYTES = 50 * 1024 * 1024    // 50 MiB
 export const FILE_CHUNK_BYTES = 16_000                   // 16 KiB
 export const FILE_ASSEMBLY_TIMEOUT_MS = 120_000          // 2 min
 export const FILE_MAX_CONCURRENT_TRANSFERS = 3
@@ -24,6 +25,14 @@ export const IMAGE_MIME_TYPES = new Set([
   'image/svg+xml',
   'image/bmp',
   'image/avif',
+])
+
+export const VIDEO_MIME_TYPES = new Set([
+  'video/mp4',
+  'video/webm',
+  'video/ogg',
+  'video/quicktime',
+  'video/x-matroska',
 ])
 
 export const GALLERY_MAX_IMAGES = 5

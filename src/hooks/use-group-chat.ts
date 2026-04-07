@@ -38,11 +38,13 @@ import {
   VOICE_NOTE_ASSEMBLY_TIMEOUT_MS,
   FILE_MAX_IMAGE_BYTES,
   FILE_MAX_GENERAL_BYTES,
+  FILE_MAX_VIDEO_BYTES,
   FILE_CHUNK_BYTES,
   FILE_SEND_DELAY_MS,
   FILE_ASSEMBLY_TIMEOUT_MS,
   FILE_MAX_CONCURRENT_TRANSFERS,
   IMAGE_MIME_TYPES,
+  VIDEO_MIME_TYPES,
   GALLERY_MAX_IMAGES,
 } from '@/constants'
 import type { ChatMessage, GalleryImage, PredictionMode } from './chat-helpers'
@@ -281,7 +283,15 @@ interface GalleryAssembly {
 }
 
 function fileMaxBytes(mimeType: string): number {
-  return IMAGE_MIME_TYPES.has(mimeType) ? FILE_MAX_IMAGE_BYTES : FILE_MAX_GENERAL_BYTES
+  if (IMAGE_MIME_TYPES.has(mimeType)) return FILE_MAX_IMAGE_BYTES
+  if (VIDEO_MIME_TYPES.has(mimeType)) return FILE_MAX_VIDEO_BYTES
+  return FILE_MAX_GENERAL_BYTES
+}
+
+function detectFileKind(mimeType: string): 'image' | 'video' | 'file' {
+  if (IMAGE_MIME_TYPES.has(mimeType)) return 'image'
+  if (VIDEO_MIME_TYPES.has(mimeType)) return 'video'
+  return 'file'
 }
 
 const TYPING_SAFETY_TIMEOUT = 30_000
@@ -575,7 +585,7 @@ export function useGroupChat(
         timed: payload.timed || undefined,
         ts: payload.ts,
       })
-      const msgKind = IMAGE_MIME_TYPES.has(payload.mimeType) ? 'image' as const : 'file' as const
+      const msgKind = detectFileKind(payload.mimeType)
       const peerName = getPeerDisplayName(senderId)
       setMessages(prev => insertSorted(prev, {
         ...buildFileMessage(
@@ -639,7 +649,7 @@ export function useGroupChat(
     const blob = new Blob([arrayBuffer], { type: assembly.mimeType })
     const objectUrl = URL.createObjectURL(blob)
     trackFileUrl(objectUrl)
-    const msgKind = IMAGE_MIME_TYPES.has(assembly.mimeType) ? 'image' as const : 'file' as const
+    const msgKind = detectFileKind(assembly.mimeType)
     const peerName = getPeerDisplayName(senderId)
     setMessages(prev => prev.map(m =>
       m.id === payload.fileId ? {
@@ -1642,7 +1652,7 @@ export function useGroupChat(
     // Show local message
     const objectUrl = URL.createObjectURL(file)
     trackFileUrl(objectUrl)
-    const msgKind = IMAGE_MIME_TYPES.has(file.type) ? 'image' as const : 'file' as const
+    const msgKind = detectFileKind(file.type)
     setMessages(prev => insertSorted(prev, {
       ...buildFileMessage(
         'self', msgKind, objectUrl, file.name,

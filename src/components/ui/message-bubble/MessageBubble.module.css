@@ -884,6 +884,56 @@
   max-width: 70%;
 }
 
+/* Video message styles */
+.bubbleWrapperVideo {
+  min-width: 14rem;
+  max-width: 50%;
+}
+
+@media (max-width: 520px) {
+  .bubbleWrapperVideo {
+    min-width: 0;
+    max-width: 80%;
+    width: 80%;
+    overflow: hidden;
+  }
+
+  .videoContent {
+    width: 100%;
+    max-width: 100%;
+  }
+}
+
+.videoContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.videoContent {
+  max-width: 100%;
+  max-height: 22rem;
+  border-radius: var(--radius-sm);
+  background: #000;
+  display: block;
+}
+
+.videoFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.videoFileName {
+  font-size: 0.7rem;
+  opacity: 0.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 70%;
+}
+
 /* Audio file card (uploaded audio rendered via AudioPlayer) */
 .audioFileCard {
   display: flex;

@@ -31,6 +31,7 @@ interface MessageBubbleProps {
     | 'text'
     | 'audio'
     | 'image'
+    | 'video'
     | 'file'
     | 'poll'
     | 'prediction'
@@ -1226,7 +1227,7 @@ export function MessageBubble({
 
   return (
     <div
-      className={`${styles.bubbleWrapper} ${isSelf ? styles.bubbleWrapperSelf : styles.bubbleWrapperPeer}${kind === 'audio' ? ` ${styles.bubbleWrapperAudio}` : ''}${kind === 'image' ? ` ${styles.bubbleWrapperImage}` : ''}${kind === 'file' ? ` ${styles.bubbleWrapperFile}` : ''}${kind === 'gallery' ? ` ${styles.bubbleWrapperGallery}` : ''}${kind === 'notefade' || kind === 'notefade-chat' ? ` ${styles.bubbleWrapperNotefade}` : ''}${hasReactions ? ` ${styles.bubbleWrapperHasReactions}` : ''}${emojiOnly ? ` ${styles.bubbleWrapperEmoji}` : ''}${fadingOut ? ` ${styles.timedFadingOut}` : ''}`}
+      className={`${styles.bubbleWrapper} ${isSelf ? styles.bubbleWrapperSelf : styles.bubbleWrapperPeer}${kind === 'audio' ? ` ${styles.bubbleWrapperAudio}` : ''}${kind === 'image' ? ` ${styles.bubbleWrapperImage}` : ''}${kind === 'video' ? ` ${styles.bubbleWrapperVideo}` : ''}${kind === 'file' ? ` ${styles.bubbleWrapperFile}` : ''}${kind === 'gallery' ? ` ${styles.bubbleWrapperGallery}` : ''}${kind === 'notefade' || kind === 'notefade-chat' ? ` ${styles.bubbleWrapperNotefade}` : ''}${hasReactions ? ` ${styles.bubbleWrapperHasReactions}` : ''}${emojiOnly ? ` ${styles.bubbleWrapperEmoji}` : ''}${fadingOut ? ` ${styles.timedFadingOut}` : ''}`}
       data-msg-id={msgId}
       role='listitem'
     >
@@ -1323,6 +1324,60 @@ export function MessageBubble({
             <div className={styles.imageFooter}>
               {fileName && (
                 <span className={styles.imageFileName}>{fileName}</span>
+              )}
+              <time
+                className={styles.time}
+                dateTime={new Date(timestamp).toISOString()}
+              >
+                {time}
+              </time>
+            </div>
+          </div>
+        ) : kind === 'video' ? (
+          <div className={styles.videoContainer}>
+            {timed && (
+              <span className={styles.timedBadge}>
+                <svg
+                  width='12'
+                  height='12'
+                  viewBox='0 0 24 24'
+                  fill='none'
+                  stroke='currentColor'
+                  strokeWidth='2.5'
+                  strokeLinecap='round'
+                  strokeLinejoin='round'
+                >
+                  <circle cx='12' cy='12' r='10' />
+                  <polyline points='12 6 12 12 16 14' />
+                </svg>
+                timed
+              </span>
+            )}
+            {transferProgress !== undefined ? (
+              <div className={styles.transferPlaceholder}>
+                <div className={styles.transferProgressBar}>
+                  <div
+                    className={`${styles.transferProgressFill} ${isSelf ? styles.transferProgressFillSelf : styles.transferProgressFillPeer}`}
+                    style={{ width: `${Math.round(transferProgress * 100)}%` }}
+                  />
+                </div>
+                <span className={styles.transferText}>
+                  {Math.round(transferProgress * 100)}%
+                  {fileSize ? ` of ${formatFileSize(fileSize)}` : ''}
+                </span>
+              </div>
+            ) : fileUrl ? (
+              <video
+                className={styles.videoContent}
+                src={fileUrl}
+                controls
+                preload='metadata'
+                playsInline
+              />
+            ) : null}
+            <div className={styles.videoFooter}>
+              {fileName && (
+                <span className={styles.videoFileName}>{fileName}</span>
               )}
               <time
                 className={styles.time}
@@ -1688,6 +1743,7 @@ export function MessageBubble({
         {onDownload &&
           (kind === 'audio' ||
             kind === 'image' ||
+            kind === 'video' ||
             kind === 'file' ||
             kind === 'gallery') && (
             <button

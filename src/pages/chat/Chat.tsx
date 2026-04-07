@@ -81,7 +81,9 @@ import {
   ROOM_INACTIVITY_TTL_MS,
   FILE_MAX_IMAGE_BYTES,
   FILE_MAX_GENERAL_BYTES,
+  FILE_MAX_VIDEO_BYTES,
   IMAGE_MIME_TYPES,
+  VIDEO_MIME_TYPES,
 } from '@/constants';
 import styles from './Chat.module.css';
 
@@ -961,7 +963,9 @@ function ChatView({
       setFileError(null);
       const maxBytes = IMAGE_MIME_TYPES.has(file.type)
         ? FILE_MAX_IMAGE_BYTES
-        : FILE_MAX_GENERAL_BYTES;
+        : VIDEO_MIME_TYPES.has(file.type)
+          ? FILE_MAX_VIDEO_BYTES
+          : FILE_MAX_GENERAL_BYTES;
       if (file.size === 0) {
         setFileError('File is empty');
         return;
