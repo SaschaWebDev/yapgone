@@ -499,29 +499,49 @@
     height: 2.25rem;
   }
 
-  .splitButton {
-    display: none;
-  }
-
   .recordingBar,
   .previewBar {
     min-height: 2rem;
-    padding: 0 0.6rem;
+    padding: 0 0.5rem;
+    margin: 0 0.3rem;
+    gap: 0.4rem;
   }
 
   .recordingTimer {
     font-size: 0.8rem;
   }
 
+  .previewTime {
+    font-size: 0.7rem;
+  }
+
+  .waveformContainer {
+    height: 1.5rem;
+  }
+
   .cancelButton,
-  .pauseButton {
+  .pauseButton,
+  .playButton {
     width: 2rem;
     height: 2rem;
     border-radius: var(--radius-sm);
   }
 
   .cancelButton svg,
-  .pauseButton svg {
+  .pauseButton svg,
+  .playButton svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .splitButton {
+    width: 3.75rem;
+    height: 2rem;
+    margin-left: 0.3rem;
+  }
+
+  .splitButtonLeft svg,
+  .splitButtonRight svg {
     width: 16px;
     height: 16px;
   }
