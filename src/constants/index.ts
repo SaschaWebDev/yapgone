@@ -91,4 +91,5 @@ export const STORAGE_KEYS = {
   CREATOR_PREFIX: 'yapgone-creator-',
   SAFEWORD_LOCK_PREFIX: 'yapgone-safeword-lock-',
   CHAT_SETTINGS: 'yapgone-chat-settings',
+  CLIENT_ID_PREFIX: 'yapgone-client-id-',
 } as const
