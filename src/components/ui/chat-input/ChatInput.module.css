@@ -526,6 +526,16 @@
     height: 1.5rem;
     min-width: 0;
     overflow: hidden;
+    gap: 3px;
+    justify-content: center;
+  }
+
+  .waveformBar {
+    width: 4px;
+  }
+
+  .waveformBarUnplayed {
+    opacity: 0.55;
   }
 
   .cancelButton,
