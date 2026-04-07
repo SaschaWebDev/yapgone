@@ -920,7 +920,7 @@
 
 .videoFooter {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 0.5rem;
 }
@@ -928,10 +928,9 @@
 .videoFileName {
   font-size: 0.7rem;
   opacity: 0.5;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 70%;
+  word-break: break-word;
+  flex: 1;
+  min-width: 0;
 }
 
 /* Audio file card (uploaded audio rendered via AudioPlayer) */

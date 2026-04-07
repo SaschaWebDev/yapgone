@@ -505,6 +505,12 @@
     padding: 0 0.5rem;
     margin: 0 0.3rem;
     gap: 0.4rem;
+    min-width: 0;
+  }
+
+  .previewBar {
+    flex: 1 1 0;
+    max-width: 10rem;
   }
 
   .recordingTimer {
@@ -513,10 +519,13 @@
 
   .previewTime {
     font-size: 0.7rem;
+    flex-shrink: 0;
   }
 
   .waveformContainer {
     height: 1.5rem;
+    min-width: 0;
+    overflow: hidden;
   }
 
   .cancelButton,
