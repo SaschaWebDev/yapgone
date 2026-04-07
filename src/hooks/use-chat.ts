@@ -66,6 +66,14 @@ export interface PollOption {
   votes: number
 }
 
+export interface PredictionOption {
+  text: string
+  votes: number
+}
+
+export type PredictionState = 'open' | 'resolved' | 'deleted'
+export type PredictionMode = 'yesno' | 'complex'
+
 export interface GalleryImage {
   fileId: string
   fileUrl?: string
@@ -77,7 +85,7 @@ export interface GalleryImage {
 
 export interface ChatMessage {
   id: string
-  kind: 'text' | 'audio' | 'image' | 'file' | 'poll' | 'gallery' | 'notefade' | 'notefade-chat'
+  kind: 'text' | 'audio' | 'image' | 'file' | 'poll' | 'gallery' | 'notefade' | 'notefade-chat' | 'prediction'
   text?: string
   audioUrl?: string
   durationMs?: number
@@ -106,6 +114,16 @@ export interface ChatMessage {
   notefadeRevealedText?: string
   notefadeRevealed?: boolean
   notefadeDestroyed?: boolean
+  predictionId?: string
+  predictionTitle?: string
+  predictionOptions?: PredictionOption[]
+  predictionMyVote?: number
+  predictionDurationMs?: number
+  predictionCreatedAt?: number
+  predictionState?: PredictionState
+  predictionWinnerIndex?: number
+  predictionCreatorId?: string
+  predictionMode?: PredictionMode
 }
 
 const SALT = new TextEncoder().encode('yapgone-chat-root')
@@ -220,6 +238,29 @@ const DecryptedPayloadSchema = z.discriminatedUnion('kind', [
     kind: z.literal('poll-vote'),
     pollId: z.string().min(1).max(32),
     optionIndices: z.array(z.number().int().nonnegative().max(19)).min(0).max(20),
+  }),
+  z.object({
+    kind: z.literal('prediction'),
+    predictionId: z.string().min(1).max(32),
+    title: z.string().min(1).max(300),
+    options: z.array(z.string().min(1).max(200)).min(2).max(10),
+    durationMs: z.number().int().positive(),
+    ts: z.number(),
+    mode: z.enum(['yesno', 'complex']),
+  }),
+  z.object({
+    kind: z.literal('prediction-vote'),
+    predictionId: z.string().min(1).max(32),
+    optionIndex: z.number().int().nonnegative().max(9),
+  }),
+  z.object({
+    kind: z.literal('prediction-outcome'),
+    predictionId: z.string().min(1).max(32),
+    winnerIndex: z.number().int().nonnegative().max(9),
+  }),
+  z.object({
+    kind: z.literal('prediction-delete'),
+    predictionId: z.string().min(1).max(32),
   }),
   z.object({
     kind: z.literal('notefade'),
@@ -593,6 +634,81 @@ export function _applyPollVote(
   })
 }
 
+export function _buildPredictionMessage(
+  sender: 'self' | 'peer',
+  predictionId: string,
+  title: string,
+  options: string[],
+  durationMs: number,
+  mode: PredictionMode,
+  displayName?: string,
+  createdAt?: number,
+): ChatMessage {
+  const ts = createdAt ?? Date.now()
+  return {
+    id: predictionId,
+    kind: 'prediction',
+    sender,
+    displayName,
+    timestamp: ts,
+    reactions: [],
+    predictionId,
+    predictionTitle: title,
+    predictionOptions: options.map(text => ({ text, votes: 0 })),
+    predictionDurationMs: durationMs,
+    predictionCreatedAt: ts,
+    predictionState: 'open',
+    predictionMyVote: undefined,
+    predictionCreatorId: sender === 'self' ? '__self__' : '__peer__',
+    predictionMode: mode,
+  }
+}
+
+export function _applyPredictionVote(
+  messages: ChatMessage[],
+  predictionId: string,
+  optionIndex: number,
+  fromSelf: boolean,
+  previousVote: number | undefined,
+): ChatMessage[] {
+  return messages.map(msg => {
+    if (msg.predictionId !== predictionId || !msg.predictionOptions) return msg
+    if (msg.predictionState !== 'open') return msg
+    if (msg.predictionCreatedAt && msg.predictionDurationMs) {
+      if (Date.now() > msg.predictionCreatedAt + msg.predictionDurationMs) return msg
+    }
+    const options = msg.predictionOptions.map((opt, i) => {
+      let votes = opt.votes
+      if (previousVote === i) votes--
+      if (optionIndex === i) votes++
+      return { ...opt, votes: Math.max(0, votes) }
+    })
+    const predictionMyVote = fromSelf ? optionIndex : msg.predictionMyVote
+    return { ...msg, predictionOptions: options, predictionMyVote }
+  })
+}
+
+export function _applyPredictionOutcome(
+  messages: ChatMessage[],
+  predictionId: string,
+  winnerIndex: number,
+): ChatMessage[] {
+  return messages.map(msg => {
+    if (msg.predictionId !== predictionId) return msg
+    return { ...msg, predictionState: 'resolved' as const, predictionWinnerIndex: winnerIndex }
+  })
+}
+
+export function _applyPredictionDelete(
+  messages: ChatMessage[],
+  predictionId: string,
+): ChatMessage[] {
+  return messages.map(msg => {
+    if (msg.predictionId !== predictionId) return msg
+    return { ...msg, predictionState: 'deleted' as const }
+  })
+}
+
 const TYPING_SAFETY_TIMEOUT = 30_000
 
 export function useChatAsCreator(
@@ -629,6 +745,8 @@ export function useChatAsCreator(
   const galleryAssembliesRef = useRef<Map<string, GalleryAssembly>>(new Map())
   const peerPollVotesRef = useRef<Map<string, number[]>>(new Map())
   const selfPollVotesRef = useRef<Map<string, number[]>>(new Map())
+  const selfPredictionVotesRef = useRef<Map<string, number>>(new Map())
+  const peerPredictionVotesRef = useRef<Map<string, number>>(new Map())
 
   const trackAudioUrl = useCallback((url: string) => {
     localAudioUrlsRef.current.add(url)
@@ -1277,6 +1395,19 @@ export function useChatAsCreator(
             const previous = peerPollVotesRef.current.get(data.pollId) ?? []
             setMessages(prev => _applyPollVote(prev, data.pollId, data.optionIndices, false, previous))
             peerPollVotesRef.current.set(data.pollId, data.optionIndices)
+          } else if (data.kind === 'prediction') {
+            setMessages(prev => _insertSorted(prev, _buildPredictionMessage(
+              'peer', data.predictionId, data.title, data.options,
+              data.durationMs, data.mode, peerUsernameRef.current ?? undefined, data.ts,
+            )))
+          } else if (data.kind === 'prediction-vote') {
+            const previous = peerPredictionVotesRef.current.get(data.predictionId)
+            setMessages(prev => _applyPredictionVote(prev, data.predictionId, data.optionIndex, false, previous))
+            peerPredictionVotesRef.current.set(data.predictionId, data.optionIndex)
+          } else if (data.kind === 'prediction-outcome') {
+            setMessages(prev => _applyPredictionOutcome(prev, data.predictionId, data.winnerIndex))
+          } else if (data.kind === 'prediction-delete') {
+            setMessages(prev => _applyPredictionDelete(prev, data.predictionId))
           } else if (data.kind === 'notefade') {
             const id = data.msgId ?? generateMessageId()
             setMessages(prev => {
@@ -1662,6 +1793,79 @@ export function useChatAsCreator(
     selfPollVotesRef.current.set(pollId, optionIndices)
   }, [])
 
+  const sendPrediction = useCallback(async (
+    title: string,
+    options: string[],
+    durationMs: number,
+    mode: PredictionMode,
+  ) => {
+    if (!ratchetRef.current || !wsRef.current) return
+    const predictionId = generateMessageId()
+    const ts = Date.now()
+    const plaintext = new TextEncoder().encode(JSON.stringify({
+      kind: 'prediction', predictionId, title, options, durationMs, ts, mode,
+    }))
+    const { state: newState, header, iv, ciphertext } = await ratchetEncrypt(
+      ratchetRef.current,
+      plaintext,
+    )
+    ratchetRef.current = newState
+    const payload = toBase64Url(concatBytes(iv, ciphertext))
+    wsRef.current.send({ type: 'message', header, payload })
+    setMessages(prev => _insertSorted(prev, _buildPredictionMessage(
+      'self', predictionId, title, options, durationMs, mode,
+      localUsernameRef.current ?? undefined, ts,
+    )))
+  }, [])
+
+  const sendPredictionVote = useCallback(async (predictionId: string, optionIndex: number) => {
+    if (!ratchetRef.current || !wsRef.current) return
+    if (selfPredictionVotesRef.current.has(predictionId)) return
+    const plaintext = new TextEncoder().encode(JSON.stringify({
+      kind: 'prediction-vote', predictionId, optionIndex,
+    }))
+    const { state: newState, header, iv, ciphertext } = await ratchetEncrypt(
+      ratchetRef.current,
+      plaintext,
+    )
+    ratchetRef.current = newState
+    const payload = toBase64Url(concatBytes(iv, ciphertext))
+    wsRef.current.send({ type: 'message', header, payload })
+    const previous = selfPredictionVotesRef.current.get(predictionId)
+    setMessages(prev => _applyPredictionVote(prev, predictionId, optionIndex, true, previous))
+    selfPredictionVotesRef.current.set(predictionId, optionIndex)
+  }, [])
+
+  const sendPredictionOutcome = useCallback(async (predictionId: string, winnerIndex: number) => {
+    if (!ratchetRef.current || !wsRef.current) return
+    const plaintext = new TextEncoder().encode(JSON.stringify({
+      kind: 'prediction-outcome', predictionId, winnerIndex,
+    }))
+    const { state: newState, header, iv, ciphertext } = await ratchetEncrypt(
+      ratchetRef.current,
+      plaintext,
+    )
+    ratchetRef.current = newState
+    const payload = toBase64Url(concatBytes(iv, ciphertext))
+    wsRef.current.send({ type: 'message', header, payload })
+    setMessages(prev => _applyPredictionOutcome(prev, predictionId, winnerIndex))
+  }, [])
+
+  const sendPredictionDelete = useCallback(async (predictionId: string) => {
+    if (!ratchetRef.current || !wsRef.current) return
+    const plaintext = new TextEncoder().encode(JSON.stringify({
+      kind: 'prediction-delete', predictionId,
+    }))
+    const { state: newState, header, iv, ciphertext } = await ratchetEncrypt(
+      ratchetRef.current,
+      plaintext,
+    )
+    ratchetRef.current = newState
+    const payload = toBase64Url(concatBytes(iv, ciphertext))
+    wsRef.current.send({ type: 'message', header, payload })
+    setMessages(prev => _applyPredictionDelete(prev, predictionId))
+  }, [])
+
   const sendGallery = useCallback(async (
     files: File[],
     caption?: string,
@@ -1805,6 +2009,10 @@ export function useChatAsCreator(
     sendNotefadeChat,
     sendPoll,
     sendPollVote,
+    sendPrediction,
+    sendPredictionVote,
+    sendPredictionOutcome,
+    sendPredictionDelete,
     sendGallery,
     sendTyping,
     sendVoiceSignal,
@@ -1853,6 +2061,8 @@ export function useChatAsJoiner(
   const galleryAssembliesRef = useRef<Map<string, GalleryAssembly>>(new Map())
   const peerPollVotesRef = useRef<Map<string, number[]>>(new Map())
   const selfPollVotesRef = useRef<Map<string, number[]>>(new Map())
+  const selfPredictionVotesRef = useRef<Map<string, number>>(new Map())
+  const peerPredictionVotesRef = useRef<Map<string, number>>(new Map())
 
   const trackAudioUrl = useCallback((url: string) => {
     localAudioUrlsRef.current.add(url)
@@ -2470,6 +2680,19 @@ export function useChatAsJoiner(
             const previous = peerPollVotesRef.current.get(data.pollId) ?? []
             setMessages(prev => _applyPollVote(prev, data.pollId, data.optionIndices, false, previous))
             peerPollVotesRef.current.set(data.pollId, data.optionIndices)
+          } else if (data.kind === 'prediction') {
+            setMessages(prev => _insertSorted(prev, _buildPredictionMessage(
+              'peer', data.predictionId, data.title, data.options,
+              data.durationMs, data.mode, peerUsernameRef.current ?? undefined, data.ts,
+            )))
+          } else if (data.kind === 'prediction-vote') {
+            const previous = peerPredictionVotesRef.current.get(data.predictionId)
+            setMessages(prev => _applyPredictionVote(prev, data.predictionId, data.optionIndex, false, previous))
+            peerPredictionVotesRef.current.set(data.predictionId, data.optionIndex)
+          } else if (data.kind === 'prediction-outcome') {
+            setMessages(prev => _applyPredictionOutcome(prev, data.predictionId, data.winnerIndex))
+          } else if (data.kind === 'prediction-delete') {
+            setMessages(prev => _applyPredictionDelete(prev, data.predictionId))
           } else if (data.kind === 'notefade') {
             const id = data.msgId ?? generateMessageId()
             setMessages(prev => {
@@ -2852,6 +3075,79 @@ export function useChatAsJoiner(
     selfPollVotesRef.current.set(pollId, optionIndices)
   }, [])
 
+  const sendPrediction = useCallback(async (
+    title: string,
+    options: string[],
+    durationMs: number,
+    mode: PredictionMode,
+  ) => {
+    if (!ratchetRef.current || !wsRef.current) return
+    const predictionId = generateMessageId()
+    const ts = Date.now()
+    const plaintext = new TextEncoder().encode(JSON.stringify({
+      kind: 'prediction', predictionId, title, options, durationMs, ts, mode,
+    }))
+    const { state: newState, header, iv, ciphertext } = await ratchetEncrypt(
+      ratchetRef.current,
+      plaintext,
+    )
+    ratchetRef.current = newState
+    const payload = toBase64Url(concatBytes(iv, ciphertext))
+    wsRef.current.send({ type: 'message', header, payload })
+    setMessages(prev => _insertSorted(prev, _buildPredictionMessage(
+      'self', predictionId, title, options, durationMs, mode,
+      localUsernameRef.current ?? undefined, ts,
+    )))
+  }, [])
+
+  const sendPredictionVote = useCallback(async (predictionId: string, optionIndex: number) => {
+    if (!ratchetRef.current || !wsRef.current) return
+    if (selfPredictionVotesRef.current.has(predictionId)) return
+    const plaintext = new TextEncoder().encode(JSON.stringify({
+      kind: 'prediction-vote', predictionId, optionIndex,
+    }))
+    const { state: newState, header, iv, ciphertext } = await ratchetEncrypt(
+      ratchetRef.current,
+      plaintext,
+    )
+    ratchetRef.current = newState
+    const payload = toBase64Url(concatBytes(iv, ciphertext))
+    wsRef.current.send({ type: 'message', header, payload })
+    const previous = selfPredictionVotesRef.current.get(predictionId)
+    setMessages(prev => _applyPredictionVote(prev, predictionId, optionIndex, true, previous))
+    selfPredictionVotesRef.current.set(predictionId, optionIndex)
+  }, [])
+
+  const sendPredictionOutcome = useCallback(async (predictionId: string, winnerIndex: number) => {
+    if (!ratchetRef.current || !wsRef.current) return
+    const plaintext = new TextEncoder().encode(JSON.stringify({
+      kind: 'prediction-outcome', predictionId, winnerIndex,
+    }))
+    const { state: newState, header, iv, ciphertext } = await ratchetEncrypt(
+      ratchetRef.current,
+      plaintext,
+    )
+    ratchetRef.current = newState
+    const payload = toBase64Url(concatBytes(iv, ciphertext))
+    wsRef.current.send({ type: 'message', header, payload })
+    setMessages(prev => _applyPredictionOutcome(prev, predictionId, winnerIndex))
+  }, [])
+
+  const sendPredictionDelete = useCallback(async (predictionId: string) => {
+    if (!ratchetRef.current || !wsRef.current) return
+    const plaintext = new TextEncoder().encode(JSON.stringify({
+      kind: 'prediction-delete', predictionId,
+    }))
+    const { state: newState, header, iv, ciphertext } = await ratchetEncrypt(
+      ratchetRef.current,
+      plaintext,
+    )
+    ratchetRef.current = newState
+    const payload = toBase64Url(concatBytes(iv, ciphertext))
+    wsRef.current.send({ type: 'message', header, payload })
+    setMessages(prev => _applyPredictionDelete(prev, predictionId))
+  }, [])
+
   const sendGallery = useCallback(async (
     files: File[],
     caption?: string,
@@ -2990,6 +3286,10 @@ export function useChatAsJoiner(
     sendTimedConsumed,
     sendPoll,
     sendPollVote,
+    sendPrediction,
+    sendPredictionVote,
+    sendPredictionOutcome,
+    sendPredictionDelete,
     sendGallery,
     sendTyping,
     sendVoiceSignal,

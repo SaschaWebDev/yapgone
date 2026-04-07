@@ -1422,6 +1422,349 @@
   margin-top: 0.2rem;
 }
 
+/* Prediction styles */
+.predictionContent {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.predictionTitle {
+  font-size: 1rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.predictionStateBadge {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: 0.25rem;
+  width: fit-content;
+}
+
+.predictionStateResolved {
+  background: rgba(34, 197, 94, 0.2);
+  color: #22c55e;
+}
+
+.predictionStateDeleted {
+  background: rgba(var(--fg), 0.08);
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+.predictionStateClosed {
+  background: rgba(245, 158, 11, 0.2);
+  color: #f59e0b;
+}
+
+.predictionTimerSection {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.predictionTimerBar {
+  height: 4px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: rgba(var(--fg), 0.1);
+}
+
+.predictionTimerBarSelf {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.predictionTimerFill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.08s linear;
+  background: var(--accent);
+  opacity: 0.7;
+}
+
+.predictionTimerFillSelf {
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.predictionTimeLabel {
+  font-size: 0.7rem;
+  color: var(--text-tertiary);
+}
+
+.predictionOptions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.predictionOption {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.5rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  width: 100%;
+  background: none;
+  transition: border-color 0.15s;
+}
+
+.predictionOptionSelf {
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.predictionOptionPeer {
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+}
+
+.predictionOptionSelected {
+  border-color: var(--accent) !important;
+}
+
+.predictionOptionWinner {
+  border-color: #22c55e !important;
+}
+
+.predictionOptionDisabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.predictionOption:disabled {
+  cursor: default;
+}
+
+.predictionProgressBar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: var(--radius-sm);
+  transition: width 0.3s ease;
+  pointer-events: none;
+}
+
+.predictionProgressBarSelf {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.predictionProgressBarPeer {
+  background: rgba(var(--accent-rgb, 99, 102, 241), 0.12);
+}
+
+.predictionProgressBarWinner {
+  background: rgba(34, 197, 94, 0.2) !important;
+}
+
+.predictionIndicator {
+  font-size: 0.85rem;
+  z-index: 1;
+  text-align: center;
+  width: 1rem;
+  flex-shrink: 0;
+}
+
+.predictionOptionText {
+  flex: 1;
+  z-index: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.predictionVoteCount {
+  font-size: 0.75rem;
+  opacity: 0.7;
+  z-index: 1;
+  flex-shrink: 0;
+}
+
+.predictionModeratorControls {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.predictionDeleteBtn {
+  padding: 0.3rem 0.65rem;
+  background: var(--error);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.predictionChooseBtn {
+  padding: 0.3rem 0.65rem;
+  background: #22c55e;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(34, 197, 94, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
+  }
+}
+
+.predictionChooseBtnPulse {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.predictionFooter {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  opacity: 0.55;
+}
+
+.predictionBadge {
+  display: inline-block;
+  font-size: 0.6rem;
+  font-weight: 600;
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.2rem;
+  margin-left: 0.35rem;
+  color: #fff;
+  vertical-align: middle;
+  opacity: 0.85;
+}
+
+/* Yes/No binary prediction */
+.yesnoPrediction {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.yesnoPercentages {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+.yesnoSide {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  flex: 1;
+  padding: 0.6rem 0.4rem;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.15s, opacity 0.15s;
+}
+
+.yesnoSide:disabled {
+  cursor: default;
+}
+
+.yesnoSideSelected {
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.yesnoSideWinner {
+  border-color: #22c55e;
+}
+
+.yesnoVoteTag {
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: #3b82f6;
+  color: #fff;
+}
+
+.yesnoLabel {
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.yesnoYes .yesnoLabel {
+  color: #3b82f6;
+}
+
+.yesnoNo .yesnoLabel {
+  color: #ec4899;
+}
+
+.yesnoPct {
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.yesnoYes .yesnoPct {
+  color: #3b82f6;
+}
+
+.yesnoNo .yesnoPct {
+  color: #ec4899;
+}
+
+.yesnoBar {
+  height: 6px;
+  border-radius: 3px;
+  background: #ec4899;
+  overflow: hidden;
+}
+
+.yesnoBarYes {
+  height: 100%;
+  background: #3b82f6;
+  border-radius: 3px 0 0 3px;
+  transition: width 0.3s ease;
+}
+
+/* Yes/No self-bubble overrides (white on accent background) */
+.yesnoYesSelf .yesnoLabel {
+  color: #fff;
+}
+
+.yesnoYesSelf .yesnoPct {
+  color: #fff;
+}
+
+.yesnoBarSelf {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.yesnoBarYesSelf {
+  background: #fff;
+}
+
 /* Light mode: darken peer bubbles for contrast against light background */
 [data-theme='light'] .peer {
   background: #e2e2e4;

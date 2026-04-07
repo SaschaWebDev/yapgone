@@ -12,6 +12,14 @@ export interface PollOption {
   votes: number
 }
 
+export interface PredictionOption {
+  text: string
+  votes: number
+}
+
+export type PredictionState = 'open' | 'resolved' | 'deleted'
+export type PredictionMode = 'yesno' | 'complex'
+
 export interface GalleryImage {
   fileId: string
   fileUrl?: string
@@ -23,7 +31,7 @@ export interface GalleryImage {
 
 export interface ChatMessage {
   id: string
-  kind: 'text' | 'audio' | 'image' | 'file' | 'poll' | 'gallery' | 'notefade' | 'notefade-chat'
+  kind: 'text' | 'audio' | 'image' | 'file' | 'poll' | 'gallery' | 'notefade' | 'notefade-chat' | 'prediction'
   text?: string
   audioUrl?: string
   durationMs?: number
@@ -53,6 +61,16 @@ export interface ChatMessage {
   notefadeRevealedText?: string
   notefadeRevealed?: boolean
   notefadeDestroyed?: boolean
+  predictionId?: string
+  predictionTitle?: string
+  predictionOptions?: PredictionOption[]
+  predictionMyVote?: number
+  predictionDurationMs?: number
+  predictionCreatedAt?: number
+  predictionState?: PredictionState
+  predictionWinnerIndex?: number
+  predictionCreatorId?: string
+  predictionMode?: PredictionMode
 }
 
 export function generateMessageId(): string {
@@ -227,6 +245,7 @@ export function findReplyPreview(messages: ChatMessage[], replyTo: string): stri
   if (target.kind === 'image') return '(image)'
   if (target.kind === 'file') return `(file: ${target.fileName ?? 'unknown'})`
   if (target.kind === 'poll') return '(poll)'
+  if (target.kind === 'prediction') return '(prediction)'
   if (target.kind === 'gallery') return '(photo gallery)'
   if (target.kind === 'notefade') return '(self-destructing note)'
   if (target.kind === 'notefade-chat') return '(secret note)'
@@ -252,6 +271,83 @@ export function applyPollVote(
     })
     const pollMyVotes = fromSelf ? [...optionIndices] : msg.pollMyVotes
     return { ...msg, pollOptions: options, pollMyVotes }
+  })
+}
+
+export function buildPredictionMessage(
+  sender: 'self' | 'peer',
+  predictionId: string,
+  title: string,
+  options: string[],
+  durationMs: number,
+  mode: PredictionMode,
+  displayName?: string,
+  createdAt?: number,
+  senderId?: string,
+): ChatMessage {
+  const ts = createdAt ?? Date.now()
+  return {
+    id: predictionId,
+    kind: 'prediction',
+    sender,
+    senderId,
+    displayName,
+    timestamp: ts,
+    reactions: [],
+    predictionId,
+    predictionTitle: title,
+    predictionOptions: options.map(text => ({ text, votes: 0 })),
+    predictionDurationMs: durationMs,
+    predictionCreatedAt: ts,
+    predictionState: 'open',
+    predictionMyVote: undefined,
+    predictionCreatorId: senderId ?? (sender === 'self' ? '__self__' : '__peer__'),
+    predictionMode: mode,
+  }
+}
+
+export function applyPredictionVote(
+  messages: ChatMessage[],
+  predictionId: string,
+  optionIndex: number,
+  fromSelf: boolean,
+  previousVote: number | undefined,
+): ChatMessage[] {
+  return messages.map(msg => {
+    if (msg.predictionId !== predictionId || !msg.predictionOptions) return msg
+    if (msg.predictionState !== 'open') return msg
+    if (msg.predictionCreatedAt && msg.predictionDurationMs) {
+      if (Date.now() > msg.predictionCreatedAt + msg.predictionDurationMs) return msg
+    }
+    const options = msg.predictionOptions.map((opt, i) => {
+      let votes = opt.votes
+      if (previousVote === i) votes--
+      if (optionIndex === i) votes++
+      return { ...opt, votes: Math.max(0, votes) }
+    })
+    const predictionMyVote = fromSelf ? optionIndex : msg.predictionMyVote
+    return { ...msg, predictionOptions: options, predictionMyVote }
+  })
+}
+
+export function applyPredictionOutcome(
+  messages: ChatMessage[],
+  predictionId: string,
+  winnerIndex: number,
+): ChatMessage[] {
+  return messages.map(msg => {
+    if (msg.predictionId !== predictionId) return msg
+    return { ...msg, predictionState: 'resolved' as const, predictionWinnerIndex: winnerIndex }
+  })
+}
+
+export function applyPredictionDelete(
+  messages: ChatMessage[],
+  predictionId: string,
+): ChatMessage[] {
+  return messages.map(msg => {
+    if (msg.predictionId !== predictionId) return msg
+    return { ...msg, predictionState: 'deleted' as const }
   })
 }
 

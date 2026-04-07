@@ -30,6 +30,7 @@ interface ChatInputProps {
   onSendFile?: (file: File) => void;
   fileError?: string | null;
   onOpenPollCreator?: () => void;
+  onOpenPredictionCreator?: () => void;
   onOpenPhotoComposer?: () => void;
   onOpenNotefadeComposer?: () => void;
   onCameraCapture?: (file: File) => void;
@@ -75,6 +76,7 @@ export function ChatInput({
   onSendFile,
   fileError,
   onOpenPollCreator,
+  onOpenPredictionCreator,
   onOpenPhotoComposer,
   onOpenNotefadeComposer,
   onCameraCapture,
@@ -578,7 +580,7 @@ export function ChatInput({
             <button
               ref={attachBtnRef}
               className={styles.attachButton}
-              onClick={() => (onOpenPollCreator || onOpenPhotoComposer || onCameraCapture || onOpenNotefadeComposer) ? setAttachMenuOpen(prev => !prev) : fileInputRef.current?.click()}
+              onClick={() => (onOpenPollCreator || onOpenPredictionCreator || onOpenPhotoComposer || onCameraCapture || onOpenNotefadeComposer) ? setAttachMenuOpen(prev => !prev) : fileInputRef.current?.click()}
               disabled={disabled}
               aria-label='Attach'
               type='button'
@@ -595,6 +597,7 @@ export function ChatInput({
                 onPhotoSelect={onOpenPhotoComposer ? () => { onOpenPhotoComposer(); setAttachMenuOpen(false) } : undefined}
                 onCameraCapture={onCameraCapture ? () => { cameraInputRef.current?.click(); setAttachMenuOpen(false) } : undefined}
                 onPollCreate={onOpenPollCreator ? () => { onOpenPollCreator(); setAttachMenuOpen(false) } : undefined}
+                onPredictionCreate={onOpenPredictionCreator ? () => { onOpenPredictionCreator(); setAttachMenuOpen(false) } : undefined}
                 onNotefadeCreate={onOpenNotefadeComposer ? () => { onOpenNotefadeComposer(); setAttachMenuOpen(false) } : undefined}
                 onEmojiSelect={isMobile ? () => { setEmojiPickerOpen(true); setAttachMenuOpen(false) } : undefined}
                 onClose={() => setAttachMenuOpen(false)}
