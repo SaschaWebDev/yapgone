@@ -9,7 +9,7 @@ export const VOICE_NOTE_CHUNK_BYTES = 4_000
 export const VOICE_NOTE_AUDIO_BITRATE = 48_000
 export const VOICE_NOTE_ASSEMBLY_TIMEOUT_MS = 60_000
 
-export const FILE_MAX_IMAGE_BYTES = 5 * 1024 * 1024    // 5 MiB
+export const FILE_MAX_IMAGE_BYTES = 15 * 1024 * 1024   // 15 MiB
 export const FILE_MAX_GENERAL_BYTES = 10 * 1024 * 1024  // 10 MiB
 export const FILE_MAX_VIDEO_BYTES = 50 * 1024 * 1024    // 50 MiB
 export const FILE_CHUNK_BYTES = 16_000                   // 16 KiB

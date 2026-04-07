@@ -662,6 +662,12 @@ function ChatView({
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
   const [inputFocusTrigger, setInputFocusTrigger] = useState(0);
   const [fileError, setFileError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!fileError) return;
+    const timer = setTimeout(() => setFileError(null), 4000);
+    return () => clearTimeout(timer);
+  }, [fileError]);
   const [autoPlayNextId, setAutoPlayNextId] = useState<string | null>(null);
   const [lightboxImage, setLightboxImage] = useState<{
     url: string;
