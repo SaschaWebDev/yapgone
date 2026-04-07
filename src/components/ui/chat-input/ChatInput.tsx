@@ -52,6 +52,23 @@ function formatMs(ms: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
+function downsampleWaveform(input: readonly number[], target: number): number[] {
+  if (input.length === 0) return [];
+  if (input.length <= target) return [...input];
+  const result: number[] = [];
+  for (let i = 0; i < target; i++) {
+    const start = Math.floor((i * input.length) / target);
+    const end = Math.floor(((i + 1) * input.length) / target);
+    let max = 0;
+    for (let j = start; j < end; j++) {
+      const v = input[j] ?? 0;
+      if (v > max) max = v;
+    }
+    result.push(max);
+  }
+  return result;
+}
+
 export function ChatInput({
   onSend,
   onSendTimed,
@@ -415,7 +432,8 @@ export function ChatInput({
 
   // Recording mode — paused sub-state (with waveform/playback)
   if (isRecording && isRecordingPaused) {
-    const waveform = previewWaveform ?? [];
+    const fullWaveform = previewWaveform ?? [];
+    const waveform = isMobile ? downsampleWaveform(fullWaveform, 14) : fullWaveform;
     const progress = previewDurationMs > 0 ? playbackMs / previewDurationMs : 0;
 
     return (
@@ -449,7 +467,8 @@ export function ChatInput({
               {waveform.map((peak, i) => {
                 const fraction = waveform.length > 0 ? i / waveform.length : 0;
                 const played = fraction < progress;
-                const height = Math.max(3, peak * 28);
+                const maxPx = isMobile ? 20 : 28;
+                const height = Math.max(3, peak * maxPx);
                 return (
                   <div
                     key={i}
