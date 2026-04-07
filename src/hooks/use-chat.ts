@@ -24,7 +24,7 @@ import type { ReconnectingChatWebSocket } from '@/ws/reconnecting-client'
 import type { ClientMessage, ServerMessage } from '@/ws'
 import type { RatchetState, VoiceSignal } from '@/types'
 import { buildWsUrl, buildSplitInviteFragment, isSplitInvite, extractUrlShare, fetchShard, storeShard } from '@/api'
-import { computeWaveform } from '@/utils'
+import { computeWaveform, getOrCreateClientId } from '@/utils'
 import type { RoomSettings } from '@/room-settings'
 import { DEFAULT_ROOM_SETTINGS, normalizeRoomSettings } from '@/room-settings'
 import {
@@ -1265,7 +1265,7 @@ export function useChatAsCreator(
           setPhase('error')
         }
 
-        ws.connect(buildWsUrl(roomId))
+        ws.connect(buildWsUrl(roomId, getOrCreateClientId(roomId)))
       } catch (err) {
         if (cancelled) return
         setError(err instanceof Error ? err.message : 'Unknown error')
@@ -2561,7 +2561,7 @@ export function useChatAsJoiner(
           setPhase('error')
         }
 
-        ws.connect(buildWsUrl(roomId))
+        ws.connect(buildWsUrl(roomId, getOrCreateClientId(roomId)))
       } catch (err) {
         if (cancelled) return
         setError(err instanceof Error ? err.message : 'Unknown error')

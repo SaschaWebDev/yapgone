@@ -6,6 +6,8 @@ const INACTIVITY_TTL_MS = 30 * 60 * 1000
 const MAX_MESSAGE_SIZE = 32768
 const MAX_MESSAGES_PER_SECOND = 60
 const VOICE_MAGIC_BYTE = 0xAA
+const RECONNECT_GRACE_MS = 8000
+const DEPARTING_KEY_PREFIX = 'departing:'
 
 const SERVER_RESERVED_TYPES = new Set([
   'peer-joined', 'peer-left', 'peer-list', 'room-full', 'room-expired', 'room-closed', 'error',
@@ -45,51 +47,123 @@ export class ChatRoom extends DurableObject {
     const stored = await this.ctx.storage.get<number>('maxClients')
     if (stored) this.maxClients = stored
 
+    // Parse client-supplied identity from query string. Falls back to a
+    // server-generated UUID for legacy clients (no resume capability).
+    const url = new URL(request.url)
+    const requestedCid = url.searchParams.get('cid')
+    const clientId = requestedCid && requestedCid.length > 0 && requestedCid.length <= 64
+      ? requestedCid
+      : crypto.randomUUID()
+
     const existingSockets = this.ctx.getWebSockets()
-    if (existingSockets.length >= this.maxClients) {
-      const pair = new WebSocketPair()
-      this.ctx.acceptWebSocket(pair[1])
-      pair[1].send(JSON.stringify({ type: 'room-full' }))
-      pair[1].close(4000, 'Room is full')
-      return new Response(null, { status: 101, webSocket: pair[0] })
+
+    // Resume detection: if any current socket already has this clientId,
+    // OR a recent close left a "departing" record, treat this as a resume.
+    const departingKey = `${DEPARTING_KEY_PREFIX}${clientId}`
+    const departingRecord = await this.ctx.storage.get<{ departedAt: number }>(departingKey)
+    const isStaleDeparting = departingRecord
+      ? Date.now() - departingRecord.departedAt > RECONNECT_GRACE_MS
+      : false
+    const hasDeparting = !!departingRecord && !isStaleDeparting
+
+    let duplicateSocket: WebSocket | null = null
+    for (const ws of existingSockets) {
+      const raw = ws.deserializeAttachment()
+      const parsed = ClientAttachmentSchema.safeParse(raw)
+      if (parsed.success && parsed.data.id === clientId) {
+        duplicateSocket = ws
+        break
+      }
+    }
+
+    const isResume = hasDeparting || duplicateSocket !== null
+
+    if (!isResume) {
+      // New client: count occupied slots = unique active cids + non-stale departing cids
+      const activeCids = new Set<string>()
+      for (const ws of existingSockets) {
+        const raw = ws.deserializeAttachment()
+        const parsed = ClientAttachmentSchema.safeParse(raw)
+        if (parsed.success) activeCids.add(parsed.data.id)
+      }
+      const departingKeys = await this.ctx.storage.list({ prefix: DEPARTING_KEY_PREFIX })
+      let departingCount = 0
+      const now = Date.now()
+      for (const [key, value] of departingKeys) {
+        const rec = value as { departedAt: number } | undefined
+        if (!rec) continue
+        if (now - rec.departedAt > RECONNECT_GRACE_MS) continue
+        const cid = key.slice(DEPARTING_KEY_PREFIX.length)
+        if (!activeCids.has(cid)) departingCount += 1
+      }
+      const occupied = activeCids.size + departingCount
+
+      if (occupied >= this.maxClients) {
+        const pair = new WebSocketPair()
+        this.ctx.acceptWebSocket(pair[1])
+        pair[1].send(JSON.stringify({ type: 'room-full' }))
+        pair[1].close(4000, 'Room is full')
+        return new Response(null, { status: 101, webSocket: pair[0] })
+      }
+    }
+
+    // Close any duplicate active socket for this clientId (e.g. second tab,
+    // or a stale connection that hasn't fired close yet).
+    if (duplicateSocket) {
+      try {
+        const raw = duplicateSocket.deserializeAttachment()
+        const att = ClientAttachmentSchema.safeParse(raw)
+        if (att.success) {
+          duplicateSocket.serializeAttachment({ ...att.data, leftExplicitly: true })
+        }
+        duplicateSocket.close(1000, 'Replaced by reconnect')
+      } catch {
+        // ignore
+      }
+    }
+
+    // Clear the departing record so the grace-period check skips this cid.
+    if (departingRecord) {
+      await this.ctx.storage.delete(departingKey)
     }
 
     const pair = new WebSocketPair()
     const serverWs = pair[1]
     this.ctx.acceptWebSocket(serverWs)
 
-    const clientId = crypto.randomUUID()
     const attachment: ClientAttachment = { id: clientId, messageTimestamps: [] }
     serverWs.serializeAttachment(attachment)
 
-    const clientCount = existingSockets.length + 1
+    // Recompute the post-acceptance roster (excluding the duplicate we just closed)
+    const roster = this.ctx.getWebSockets().filter(s => s !== serverWs && s !== duplicateSocket)
+    const rosterCids = new Set<string>()
+    for (const ws of roster) {
+      const raw = ws.deserializeAttachment()
+      const parsed = ClientAttachmentSchema.safeParse(raw)
+      if (parsed.success) rosterCids.add(parsed.data.id)
+    }
+    const clientCount = rosterCids.size + 1
 
-    if (existingSockets.length > 0) {
+    if (rosterCids.size > 0) {
       this.peerHasJoined = true
     }
 
     // Send peer-list to the new client with all existing client IDs
-    const existingClientIds: string[] = []
-    for (const ws of existingSockets) {
-      const raw = ws.deserializeAttachment()
-      const parsed = ClientAttachmentSchema.safeParse(raw)
-      if (parsed.success) {
-        existingClientIds.push(parsed.data.id)
-      }
-    }
     serverWs.send(JSON.stringify({
       type: 'peer-list',
-      clientIds: existingClientIds,
+      clientIds: Array.from(rosterCids),
       yourId: clientId,
     }))
 
-    // Notify existing clients about the new peer
-    for (const ws of existingSockets) {
-      ws.send(JSON.stringify({
-        type: 'peer-joined',
-        clientId,
-        clientCount,
-      }))
+    // Notify existing peers ONLY for genuinely new joins, not resumes.
+    if (!isResume) {
+      for (const ws of roster) {
+        ws.send(JSON.stringify({
+          type: 'peer-joined',
+          clientId,
+          clientCount,
+        }))
+      }
     }
 
     this.resetInactivityAlarm()
@@ -243,22 +317,75 @@ export class ChatRoom extends DurableObject {
     const leftExplicitly = att.success && att.data.leftExplicitly
     const clientId = att.success ? att.data.id : 'unknown'
 
-    if (!leftExplicitly) {
-      // Only notify peers for unexpected disconnects (tab crash, network drop).
-      // Explicit leaves already sent peer-left in the message handler.
+    if (leftExplicitly) {
+      // Explicit leaves already notified peers in the message handler.
+      // No grace period: clean up any departing record for this cid.
+      await this.ctx.storage.delete(`${DEPARTING_KEY_PREFIX}${clientId}`)
       const remaining = this.ctx.getWebSockets().filter(s => s !== ws)
-      const clientCount = remaining.length
-      for (const peer of remaining) {
+      if (remaining.length === 0) {
+        await this.ctx.storage.setAlarm(Date.now() + 5000)
+      }
+      return
+    }
+
+    // Unexpected disconnect (tab crash, network drop, mobile background).
+    // Mark as departing and defer the peer-left notification by RECONNECT_GRACE_MS
+    // so a quick reconnect with the same clientId is treated as a resume.
+    const departedAt = Date.now()
+    await this.ctx.storage.put(`${DEPARTING_KEY_PREFIX}${clientId}`, { departedAt })
+
+    this.ctx.waitUntil(
+      new Promise<void>((resolve) => {
+        setTimeout(() => {
+          void this.finalizeDeparture(clientId, departedAt).finally(resolve)
+        }, RECONNECT_GRACE_MS + 100)
+      }),
+    )
+  }
+
+  private async finalizeDeparture(clientId: string, departedAt: number): Promise<void> {
+    const key = `${DEPARTING_KEY_PREFIX}${clientId}`
+    const record = await this.ctx.storage.get<{ departedAt: number }>(key)
+    // If record is missing or has been replaced by a newer departure, this
+    // particular departure was already resolved (resumed or superseded).
+    if (!record || record.departedAt !== departedAt) return
+
+    // Confirm the cid is still NOT held by any active socket (resume check).
+    const sockets = this.ctx.getWebSockets()
+    for (const ws of sockets) {
+      const raw = ws.deserializeAttachment()
+      const parsed = ClientAttachmentSchema.safeParse(raw)
+      if (parsed.success && parsed.data.id === clientId) {
+        // Resumed via a new socket — drop the departing record and bail.
+        await this.ctx.storage.delete(key)
+        return
+      }
+    }
+
+    // Truly gone. Remove the departing record and notify remaining peers.
+    await this.ctx.storage.delete(key)
+
+    const activeCids = new Set<string>()
+    for (const ws of sockets) {
+      const raw = ws.deserializeAttachment()
+      const parsed = ClientAttachmentSchema.safeParse(raw)
+      if (parsed.success) activeCids.add(parsed.data.id)
+    }
+    const clientCount = activeCids.size
+
+    for (const peer of sockets) {
+      try {
         peer.send(JSON.stringify({
           type: 'peer-left',
           clientId,
           clientCount,
         }))
+      } catch {
+        // ignore
       }
     }
 
-    const remaining = this.ctx.getWebSockets().filter(s => s !== ws)
-    if (remaining.length === 0) {
+    if (sockets.length === 0) {
       await this.ctx.storage.setAlarm(Date.now() + 5000)
     }
   }

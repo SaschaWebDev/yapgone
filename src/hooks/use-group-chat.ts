@@ -28,7 +28,7 @@ import { createReconnectingWebSocket } from '@/ws/reconnecting-client'
 import type { ReconnectingChatWebSocket } from '@/ws/reconnecting-client'
 import type { VoiceSignal } from '@/types'
 import { buildWsUrl, buildSplitInviteFragment, storeShard, fetchShard, isSplitInvite, updateRoomConfig } from '@/api'
-import { computeWaveform } from '@/utils'
+import { computeWaveform, getOrCreateClientId } from '@/utils'
 import type { RoomSettings } from '@/room-settings'
 import { DEFAULT_ROOM_SETTINGS, normalizeRoomSettings } from '@/room-settings'
 import {
@@ -1330,6 +1330,19 @@ export function useGroupChat(
           // Handle peer-list (sent on connect)
           if (msg.type === 'peer-list') {
             const { clientIds, yourId } = msg
+
+            // Resume detection: if we already hold this clientId AND have
+            // initialized group crypto, this is a reconnect. Reuse the
+            // existing state instead of wiping ratchets and forcing a new
+            // key exchange — peers haven't reset, so re-init would desync.
+            if (
+              myClientIdRef.current === yourId &&
+              groupCryptoRef.current !== null
+            ) {
+              setParticipantCount(clientIds.length + 1)
+              return
+            }
+
             setMyClientId(yourId)
             myClientIdRef.current = yourId
 
@@ -1462,7 +1475,7 @@ export function useGroupChat(
           setPhase('error')
         }
 
-        ws.connect(buildWsUrl(roomId))
+        ws.connect(buildWsUrl(roomId, getOrCreateClientId(roomId)))
       } catch (err) {
         if (cancelled) return
         setError(err instanceof Error ? err.message : 'Unknown error')

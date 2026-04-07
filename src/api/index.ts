@@ -107,11 +107,12 @@ export async function readNotefadeNote(url: string): Promise<string> {
   return parsed.text
 }
 
-export function buildWsUrl(roomId: string): string {
+export function buildWsUrl(roomId: string, clientId?: string): string {
   const base = API_BASE_URL || window.location.origin
   const protocol = base.startsWith('https') ? 'wss' : 'ws'
   const host = base.replace(/^https?:\/\//, '')
-  return `${protocol}://${host}/ws/${roomId}`
+  const url = `${protocol}://${host}/ws/${roomId}`
+  return clientId ? `${url}?cid=${encodeURIComponent(clientId)}` : url
 }
 
 export function buildInviteFragment(
