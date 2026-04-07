@@ -9,11 +9,19 @@ import type {
   PollOption,
   GalleryImage,
 } from '@/hooks/use-chat';
+import type {
+  PredictionOption,
+  PredictionState,
+  PredictionMode,
+} from '@/hooks/chat-helpers';
 import {
   TIMED_MESSAGE_TTL_MS,
   TIMED_MESSAGE_FADEOUT_MS,
   TIMED_VOICE_FALLBACK_TTL_MS,
+  PREDICTION_TIMER_INTERVAL_MS,
 } from '@/constants';
+import { ChooseOutcomeModal } from '../choose-outcome-modal';
+import { ConfirmModal } from '../confirm-modal';
 import styles from './MessageBubble.module.css';
 
 type PickerMode = 'closed' | 'compact' | 'expanded';
@@ -25,6 +33,7 @@ interface MessageBubbleProps {
     | 'image'
     | 'file'
     | 'poll'
+    | 'prediction'
     | 'gallery'
     | 'notefade'
     | 'notefade-chat';
@@ -65,6 +74,23 @@ interface MessageBubbleProps {
   pollMyVotes?: number[];
   pollId?: string;
   onPollVote?: (pollId: string, optionIndices: number[]) => void;
+  predictionId?: string;
+  predictionTitle?: string;
+  predictionOptions?: PredictionOption[];
+  predictionMyVote?: number;
+  predictionDurationMs?: number;
+  predictionCreatedAt?: number;
+  predictionState?: PredictionState;
+  predictionWinnerIndex?: number;
+  predictionMode?: PredictionMode;
+  isModerator?: boolean;
+  onPredictionVote?: (predictionId: string, optionIndex: number) => void;
+  onPredictionChooseOutcome?: (
+    predictionId: string,
+    winnerIndex: number,
+  ) => void;
+  onPredictionDelete?: (predictionId: string) => void;
+  predictionBadge?: { text: string; color: string };
   notefadeUrl?: string;
   notefadeRevealedText?: string;
   notefadeRevealed?: boolean;
@@ -604,6 +630,338 @@ function GalleryBubbleContent({
   );
 }
 
+export const PREDICTION_BADGE_COLORS = [
+  '#3b82f6',
+  '#ef4444',
+  '#22c55e',
+  '#f59e0b',
+  '#8b5cf6',
+  '#ec4899',
+  '#06b6d4',
+  '#84cc16',
+  '#f97316',
+  '#6366f1',
+];
+
+function formatTimeRemaining(ms: number): string {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes > 0) return `${minutes}m ${seconds}s remaining`;
+  return `${seconds}s remaining`;
+}
+
+interface PredictionBubbleContentProps {
+  predictionId: string;
+  predictionTitle?: string;
+  predictionOptions: PredictionOption[];
+  predictionMyVote?: number;
+  predictionDurationMs: number;
+  predictionCreatedAt: number;
+  predictionState: PredictionState;
+  predictionWinnerIndex?: number;
+  predictionMode: PredictionMode;
+  isModerator: boolean;
+  onPredictionVote?: (predictionId: string, optionIndex: number) => void;
+  onPredictionChooseOutcome?: (
+    predictionId: string,
+    winnerIndex: number,
+  ) => void;
+  onPredictionDelete?: (predictionId: string) => void;
+  isSelf: boolean;
+  timestamp: number;
+}
+
+function PredictionBubbleContent({
+  predictionId,
+  predictionTitle,
+  predictionOptions,
+  predictionMyVote,
+  predictionDurationMs,
+  predictionCreatedAt,
+  predictionState,
+  predictionWinnerIndex,
+  predictionMode,
+  isModerator,
+  onPredictionVote,
+  onPredictionChooseOutcome,
+  onPredictionDelete,
+  isSelf,
+  timestamp,
+}: PredictionBubbleContentProps) {
+  const [countdownProgress, setCountdownProgress] = useState(0);
+  const [isExpired, setIsExpired] = useState(false);
+  const [confirmVoteIndex, setConfirmVoteIndex] = useState<number | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showChooseOutcome, setShowChooseOutcome] = useState(false);
+
+  useEffect(() => {
+    if (predictionState !== 'open') return;
+    const deadline = predictionCreatedAt + predictionDurationMs;
+    const check = () => {
+      const remaining = Math.max(0, deadline - Date.now());
+      setCountdownProgress(1 - remaining / predictionDurationMs);
+      if (remaining <= 0) setIsExpired(true);
+    };
+    check();
+    const interval = setInterval(check, PREDICTION_TIMER_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [predictionCreatedAt, predictionDurationMs, predictionState]);
+
+  const totalVotes = predictionOptions.reduce((sum, o) => sum + o.votes, 0);
+  const deadline = predictionCreatedAt + predictionDurationMs;
+  const remainingMs = Math.max(0, deadline - Date.now());
+  const canVote =
+    predictionState === 'open' &&
+    !isExpired &&
+    predictionMyVote === undefined &&
+    Boolean(onPredictionVote);
+  const isResolved = predictionState === 'resolved';
+  const isDeleted = predictionState === 'deleted';
+  const isClosed = predictionState === 'open' && isExpired;
+
+  const handleVoteClick = (index: number) => {
+    if (!canVote) return;
+    setConfirmVoteIndex(index);
+  };
+
+  const handleConfirmVote = () => {
+    if (confirmVoteIndex === null || !onPredictionVote) return;
+    onPredictionVote(predictionId, confirmVoteIndex);
+    setConfirmVoteIndex(null);
+  };
+
+  const handleDelete = () => {
+    onPredictionDelete?.(predictionId);
+    setShowDeleteConfirm(false);
+  };
+
+  const ts = new Date(timestamp);
+  const timeStr = `${ts.getHours().toString().padStart(2, '0')}:${ts.getMinutes().toString().padStart(2, '0')}`;
+
+  return (
+    <div className={styles.predictionContent}>
+      <p className={styles.predictionTitle}>{predictionTitle}</p>
+
+      {isDeleted && (
+        <span
+          className={`${styles.predictionStateBadge} ${styles.predictionStateDeleted}`}
+        >
+          Prediction deleted
+        </span>
+      )}
+      {isResolved &&
+        predictionWinnerIndex !== undefined &&
+        predictionOptions[predictionWinnerIndex] && (
+          <span
+            className={`${styles.predictionStateBadge} ${styles.predictionStateResolved}`}
+          >
+            Outcome: {predictionOptions[predictionWinnerIndex].text}
+          </span>
+        )}
+      {isClosed && (
+        <span
+          className={`${styles.predictionStateBadge} ${styles.predictionStateClosed}`}
+        >
+          Voting closed
+        </span>
+      )}
+
+      {predictionState === 'open' && !isExpired && (
+        <div className={styles.predictionTimerSection}>
+          <div
+            className={
+              isSelf
+                ? `${styles.predictionTimerBar} ${styles.predictionTimerBarSelf}`
+                : styles.predictionTimerBar
+            }
+          >
+            <div
+              className={
+                isSelf
+                  ? `${styles.predictionTimerFill} ${styles.predictionTimerFillSelf}`
+                  : styles.predictionTimerFill
+              }
+              style={{ width: `${(1 - countdownProgress) * 100}%` }}
+            />
+          </div>
+          <span className={styles.predictionTimeLabel}>
+            {formatTimeRemaining(remainingMs)}
+          </span>
+        </div>
+      )}
+
+      {predictionMode === 'yesno' && predictionOptions.length === 2 ? (
+        <div className={styles.yesnoPrediction}>
+          <div className={styles.yesnoPercentages}>
+            <button
+              type='button'
+              className={`${styles.yesnoSide} ${styles.yesnoYes}${isSelf ? ` ${styles.yesnoYesSelf}` : ''}${predictionMyVote === 0 ? ` ${styles.yesnoSideSelected}` : ''}${isResolved && predictionWinnerIndex === 0 ? ` ${styles.yesnoSideWinner}` : ''}`}
+              disabled={!canVote}
+              onClick={() => handleVoteClick(0)}
+            >
+              {canVote && <span className={styles.yesnoVoteTag}>Vote</span>}
+              <span className={styles.yesnoLabel}>Yes</span>
+              <span className={styles.yesnoPct}>
+                {totalVotes > 0
+                  ? Math.round(
+                      ((predictionOptions[0]?.votes ?? 0) / totalVotes) * 100,
+                    )
+                  : 0}
+                %
+              </span>
+            </button>
+            <button
+              type='button'
+              className={`${styles.yesnoSide} ${styles.yesnoNo}${predictionMyVote === 1 ? ` ${styles.yesnoSideSelected}` : ''}${isResolved && predictionWinnerIndex === 1 ? ` ${styles.yesnoSideWinner}` : ''}`}
+              disabled={!canVote}
+              onClick={() => handleVoteClick(1)}
+            >
+              {canVote && <span className={styles.yesnoVoteTag}>Vote</span>}
+              <span className={styles.yesnoLabel}>No</span>
+              <span className={styles.yesnoPct}>
+                {totalVotes > 0
+                  ? Math.round(
+                      ((predictionOptions[1]?.votes ?? 0) / totalVotes) * 100,
+                    )
+                  : 0}
+                %
+              </span>
+            </button>
+          </div>
+          <div
+            className={`${styles.yesnoBar}${isSelf ? ` ${styles.yesnoBarSelf}` : ''}`}
+          >
+            <div
+              className={`${styles.yesnoBarYes}${isSelf ? ` ${styles.yesnoBarYesSelf}` : ''}`}
+              style={{
+                width:
+                  totalVotes > 0
+                    ? `${((predictionOptions[0]?.votes ?? 0) / totalVotes) * 100}%`
+                    : '50%',
+              }}
+            />
+          </div>
+        </div>
+      ) : (
+        <div className={styles.predictionOptions}>
+          {predictionOptions.map((opt, i) => {
+            const pct = totalVotes > 0 ? (opt.votes / totalVotes) * 100 : 0;
+            const isWinner = isResolved && predictionWinnerIndex === i;
+            const isVoted = predictionMyVote === i;
+            const disabled = !canVote || isDeleted || isResolved || isClosed;
+
+            return (
+              <div key={i}>
+                <button
+                  type='button'
+                  className={`${styles.predictionOption} ${isSelf ? styles.predictionOptionSelf : styles.predictionOptionPeer}${isWinner ? ` ${styles.predictionOptionWinner}` : ''}${isDeleted ? ` ${styles.predictionOptionDisabled}` : ''}${isVoted ? ` ${styles.predictionOptionSelected}` : ''}`}
+                  disabled={disabled}
+                  onClick={() => handleVoteClick(i)}
+                >
+                  <div
+                    className={`${styles.predictionProgressBar} ${isSelf ? styles.predictionProgressBarSelf : styles.predictionProgressBarPeer}${isWinner ? ` ${styles.predictionProgressBarWinner}` : ''}`}
+                    style={{ width: `${pct}%` }}
+                  />
+                  <span className={styles.predictionIndicator}>
+                    {isWinner ? '\u2713' : isVoted ? '\u25C9' : '\u25CB'}
+                  </span>
+                  <span className={styles.predictionOptionText}>
+                    {opt.text}
+                  </span>
+                  <span className={styles.predictionVoteCount}>
+                    {opt.votes}
+                  </span>
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {isModerator && predictionState === 'open' && (
+        <div className={styles.predictionModeratorControls}>
+          <button
+            type='button'
+            className={styles.predictionDeleteBtn}
+            onClick={() => setShowDeleteConfirm(true)}
+          >
+            Delete
+          </button>
+          <button
+            type='button'
+            className={`${styles.predictionChooseBtn}${isClosed ? ` ${styles.predictionChooseBtnPulse}` : ''}`}
+            onClick={() => setShowChooseOutcome(true)}
+          >
+            Choose Outcome
+          </button>
+        </div>
+      )}
+
+      <div className={styles.predictionFooter}>
+        <span>
+          {totalVotes} {totalVotes === 1 ? 'vote' : 'votes'}
+        </span>
+        <span>{timeStr}</span>
+      </div>
+
+      {confirmVoteIndex !== null && (
+        <ConfirmModal
+          title='Your Prediction'
+          description={
+            predictionMode === 'yesno' ? (
+              <>
+                You predict that for
+                <br />
+                <strong>{predictionTitle?.replace(/\?$/, '')}</strong>
+                <br />
+                the outcome is
+                <br />
+                <strong>{confirmVoteIndex === 0 ? 'Yes' : 'No'}</strong>
+              </>
+            ) : (
+              <>
+                You predict that for
+                <br />
+                <strong>{predictionTitle?.replace(/\?$/, '')}</strong>
+                <br />
+                the outcome is
+                <br />
+                <strong>{predictionOptions[confirmVoteIndex]?.text}</strong>
+              </>
+            )
+          }
+          onConfirm={handleConfirmVote}
+          onClose={() => setConfirmVoteIndex(null)}
+        />
+      )}
+
+      {showDeleteConfirm && (
+        <ConfirmModal
+          title='Delete this prediction?'
+          description='All votes will be lost.'
+          confirmText='Delete'
+          confirmIntent='destructive'
+          onConfirm={handleDelete}
+          onClose={() => setShowDeleteConfirm(false)}
+        />
+      )}
+
+      {showChooseOutcome && predictionTitle && (
+        <ChooseOutcomeModal
+          predictionTitle={predictionTitle}
+          options={predictionOptions}
+          onChoose={(winnerIndex) => {
+            onPredictionChooseOutcome?.(predictionId, winnerIndex);
+            setShowChooseOutcome(false);
+          }}
+          onClose={() => setShowChooseOutcome(false)}
+        />
+      )}
+    </div>
+  );
+}
+
 export function MessageBubble({
   kind = 'text',
   text,
@@ -643,6 +1001,20 @@ export function MessageBubble({
   pollMyVotes,
   pollId,
   onPollVote,
+  predictionId,
+  predictionTitle,
+  predictionOptions,
+  predictionMyVote,
+  predictionDurationMs,
+  predictionCreatedAt,
+  predictionState,
+  predictionWinnerIndex,
+  predictionMode,
+  isModerator,
+  onPredictionVote,
+  onPredictionChooseOutcome,
+  onPredictionDelete,
+  predictionBadge,
   notefadeUrl,
   notefadeRevealedText,
   notefadeRevealed,
@@ -872,6 +1244,14 @@ export function MessageBubble({
             style={senderColorProp ? { color: senderColorProp } : undefined}
           >
             {displayName}
+            {predictionBadge && (
+              <span
+                className={styles.predictionBadge}
+                style={{ background: predictionBadge.color }}
+              >
+                {predictionBadge.text}
+              </span>
+            )}
           </p>
         )}
         {replyTo && replyPreview && (
@@ -1064,6 +1444,29 @@ export function MessageBubble({
             pollAllowMultiple={pollAllowMultiple}
             pollMyVotes={pollMyVotes}
             onPollVote={onPollVote}
+            isSelf={isSelf}
+            timestamp={timestamp}
+          />
+        ) : kind === 'prediction' &&
+          predictionOptions &&
+          predictionId &&
+          predictionState &&
+          predictionDurationMs !== undefined &&
+          predictionCreatedAt !== undefined ? (
+          <PredictionBubbleContent
+            predictionId={predictionId}
+            predictionTitle={predictionTitle}
+            predictionOptions={predictionOptions}
+            predictionMyVote={predictionMyVote}
+            predictionDurationMs={predictionDurationMs}
+            predictionCreatedAt={predictionCreatedAt}
+            predictionState={predictionState}
+            predictionWinnerIndex={predictionWinnerIndex}
+            predictionMode={predictionMode ?? 'complex'}
+            isModerator={isModerator ?? false}
+            onPredictionVote={onPredictionVote}
+            onPredictionChooseOutcome={onPredictionChooseOutcome}
+            onPredictionDelete={onPredictionDelete}
             isSelf={isSelf}
             timestamp={timestamp}
           />

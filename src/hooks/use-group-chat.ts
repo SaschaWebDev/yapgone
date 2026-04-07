@@ -45,7 +45,7 @@ import {
   IMAGE_MIME_TYPES,
   GALLERY_MAX_IMAGES,
 } from '@/constants'
-import type { ChatMessage, GalleryImage } from './chat-helpers'
+import type { ChatMessage, GalleryImage, PredictionMode } from './chat-helpers'
 import {
   generateMessageId,
   buildTextMessage,
@@ -54,9 +54,13 @@ import {
   buildNotefadeMessage,
   buildNotefadeChatMessage,
   buildPollMessage,
+  buildPredictionMessage,
   applyReaction,
   findReplyPreview,
   applyPollVote,
+  applyPredictionVote,
+  applyPredictionOutcome,
+  applyPredictionDelete,
   insertSorted,
   chunkBytes,
   concatChunks,
@@ -188,6 +192,29 @@ const DecryptedPayloadSchema = z.discriminatedUnion('kind', [
     optionIndices: z.array(z.number().int().nonnegative().max(19)).min(0).max(20),
   }),
   z.object({
+    kind: z.literal('prediction'),
+    predictionId: z.string().min(1).max(32),
+    title: z.string().min(1).max(300),
+    options: z.array(z.string().min(1).max(200)).min(2).max(10),
+    durationMs: z.number().int().positive(),
+    ts: z.number(),
+    mode: z.enum(['yesno', 'complex']),
+  }),
+  z.object({
+    kind: z.literal('prediction-vote'),
+    predictionId: z.string().min(1).max(32),
+    optionIndex: z.number().int().nonnegative().max(9),
+  }),
+  z.object({
+    kind: z.literal('prediction-outcome'),
+    predictionId: z.string().min(1).max(32),
+    winnerIndex: z.number().int().nonnegative().max(9),
+  }),
+  z.object({
+    kind: z.literal('prediction-delete'),
+    predictionId: z.string().min(1).max(32),
+  }),
+  z.object({
     kind: z.literal('notefade'),
     url: z.string().url(),
     msgId: z.string().min(1).max(32).optional(),
@@ -306,6 +333,8 @@ export function useGroupChat(
   const galleryAssembliesRef = useRef<Map<string, GalleryAssembly>>(new Map())
   const peerPollVotesRef = useRef<Map<string, number[]>>(new Map())
   const selfPollVotesRef = useRef<Map<string, number[]>>(new Map())
+  const selfPredictionVotesRef = useRef<Map<string, number>>(new Map())
+  const peerPredictionVotesRef = useRef<Map<string, number>>(new Map())
   // Track which peers we're still doing key exchange with
   const pendingKeyExchangeRef = useRef<Set<string>>(new Set())
   // For 2-party mode: track the single peer's ratchet for direct use
@@ -1167,6 +1196,19 @@ export function useGroupChat(
           const previous = peerPollVotesRef.current.get(data.pollId) ?? []
           setMessages(prev => applyPollVote(prev, data.pollId, data.optionIndices, false, previous))
           peerPollVotesRef.current.set(data.pollId, data.optionIndices)
+        } else if (data.kind === 'prediction') {
+          setMessages(prev => insertSorted(prev, buildPredictionMessage(
+            'peer', data.predictionId, data.title, data.options,
+            data.durationMs, data.mode, peerName, data.ts, senderId,
+          )))
+        } else if (data.kind === 'prediction-vote') {
+          const previous = peerPredictionVotesRef.current.get(data.predictionId)
+          setMessages(prev => applyPredictionVote(prev, data.predictionId, data.optionIndex, false, previous))
+          peerPredictionVotesRef.current.set(data.predictionId, data.optionIndex)
+        } else if (data.kind === 'prediction-outcome') {
+          setMessages(prev => applyPredictionOutcome(prev, data.predictionId, data.winnerIndex))
+        } else if (data.kind === 'prediction-delete') {
+          setMessages(prev => applyPredictionDelete(prev, data.predictionId))
         } else if (data.kind === 'notefade') {
           const id = data.msgId ?? generateMessageId()
           setMessages(prev => {
@@ -1670,6 +1712,43 @@ export function useGroupChat(
     selfPollVotesRef.current.set(pollId, optionIndices)
   }, [encryptAndSend])
 
+  const sendPrediction = useCallback(async (
+    title: string,
+    options: string[],
+    durationMs: number,
+    mode: PredictionMode,
+  ) => {
+    if (!groupCryptoRef.current || !wsRef.current) return
+    const predictionId = generateMessageId()
+    const ts = Date.now()
+    await encryptAndSend({ kind: 'prediction', predictionId, title, options, durationMs, ts, mode })
+    setMessages(prev => insertSorted(prev, buildPredictionMessage(
+      'self', predictionId, title, options, durationMs, mode,
+      localUsernameRef.current ?? undefined, ts, groupCryptoRef.current?.myId,
+    )))
+  }, [encryptAndSend])
+
+  const sendPredictionVote = useCallback(async (predictionId: string, optionIndex: number) => {
+    if (!groupCryptoRef.current || !wsRef.current) return
+    if (selfPredictionVotesRef.current.has(predictionId)) return
+    await encryptAndSend({ kind: 'prediction-vote', predictionId, optionIndex })
+    const previous = selfPredictionVotesRef.current.get(predictionId)
+    setMessages(prev => applyPredictionVote(prev, predictionId, optionIndex, true, previous))
+    selfPredictionVotesRef.current.set(predictionId, optionIndex)
+  }, [encryptAndSend])
+
+  const sendPredictionOutcome = useCallback(async (predictionId: string, winnerIndex: number) => {
+    if (!groupCryptoRef.current || !wsRef.current) return
+    await encryptAndSend({ kind: 'prediction-outcome', predictionId, winnerIndex })
+    setMessages(prev => applyPredictionOutcome(prev, predictionId, winnerIndex))
+  }, [encryptAndSend])
+
+  const sendPredictionDelete = useCallback(async (predictionId: string) => {
+    if (!groupCryptoRef.current || !wsRef.current) return
+    await encryptAndSend({ kind: 'prediction-delete', predictionId })
+    setMessages(prev => applyPredictionDelete(prev, predictionId))
+  }, [encryptAndSend])
+
   const sendGallery = useCallback(async (
     files: File[],
     caption?: string,
@@ -1779,6 +1858,10 @@ export function useGroupChat(
     sendNotefadeChat,
     sendPoll,
     sendPollVote,
+    sendPrediction,
+    sendPredictionVote,
+    sendPredictionOutcome,
+    sendPredictionDelete,
     sendGallery,
     sendTyping,
     sendVoiceSignal,

@@ -27,6 +27,7 @@ import type {
   ChatMessage,
   GalleryImage,
   MessageReaction,
+  PredictionMode,
 } from '@/hooks/chat-helpers';
 import type { ConnectionQuality } from '@/components/ui/status-badge/StatusBadge';
 import type { RoomSettings } from '@/room-settings';
@@ -56,6 +57,7 @@ import {
   InactivityCountdown,
   ImageLightbox,
   PollCreator,
+  PredictionCreator,
   PhotoComposer,
   NotefadeComposer,
   SafetyNumber,
@@ -240,6 +242,10 @@ function CreatorChat({
     sendTimedConsumed,
     sendPoll,
     sendPollVote,
+    sendPrediction,
+    sendPredictionVote,
+    sendPredictionOutcome,
+    sendPredictionDelete,
     sendGallery,
     sendTyping,
     sendVoiceSignal,
@@ -307,6 +313,10 @@ function CreatorChat({
       onSendFile={sendFile}
       onSendPoll={sendPoll}
       onPollVote={sendPollVote}
+      onSendPrediction={sendPrediction}
+      onPredictionVote={sendPredictionVote}
+      onPredictionChooseOutcome={sendPredictionOutcome}
+      onPredictionDelete={sendPredictionDelete}
       onSendGallery={sendGallery}
       onSendNotefade={sendNotefade}
       onSendNotefadeChat={sendNotefadeChat}
@@ -357,6 +367,10 @@ function JoinerChat({
     sendTimedConsumed,
     sendPoll,
     sendPollVote,
+    sendPrediction,
+    sendPredictionVote,
+    sendPredictionOutcome,
+    sendPredictionDelete,
     sendGallery,
     sendTyping,
     sendVoiceSignal,
@@ -423,6 +437,10 @@ function JoinerChat({
       onSendFile={sendFile}
       onSendPoll={sendPoll}
       onPollVote={sendPollVote}
+      onSendPrediction={sendPrediction}
+      onPredictionVote={sendPredictionVote}
+      onPredictionChooseOutcome={sendPredictionOutcome}
+      onPredictionDelete={sendPredictionDelete}
       onSendGallery={sendGallery}
       onSendNotefade={sendNotefade}
       onSendNotefadeChat={sendNotefadeChat}
@@ -524,6 +542,10 @@ interface ChatViewProps {
     allowMultiple: boolean,
   ) => Promise<void>;
   onPollVote: (pollId: string, optionIndices: number[]) => Promise<void>;
+  onSendPrediction: (title: string, options: string[], durationMs: number, mode: PredictionMode) => Promise<void>;
+  onPredictionVote: (predictionId: string, optionIndex: number) => Promise<void>;
+  onPredictionChooseOutcome: (predictionId: string, winnerIndex: number) => Promise<void>;
+  onPredictionDelete: (predictionId: string) => Promise<void>;
   onSendGallery: (
     files: File[],
     caption?: string,
@@ -573,6 +595,10 @@ function ChatView({
   onSendTimedConsumed,
   onSendPoll,
   onPollVote,
+  onSendPrediction,
+  onPredictionVote,
+  onPredictionChooseOutcome,
+  onPredictionDelete,
   onSendGallery,
   onSendNotefade,
   onSendNotefadeChat,
@@ -640,6 +666,7 @@ function ChatView({
     fileName?: string;
   } | null>(null);
   const [pollCreatorOpen, setPollCreatorOpen] = useState(false);
+  const [predictionCreatorOpen, setPredictionCreatorOpen] = useState(false);
   const [photoComposerOpen, setPhotoComposerOpen] = useState(false);
   const [cameraFile, setCameraFile] = useState<File | null>(null);
   const [notefadeComposerOpen, setNotefadeComposerOpen] = useState(false);
@@ -732,6 +759,21 @@ function ChatView({
     for (const [id] of peerPubKeys) ids.push(id);
     return buildIdentityMap(ids);
   }, [myClientId, peerPubKeys]);
+
+  const predictionBadges = useMemo(() => {
+    const badges = new Map<string, { text: string; color: string }>()
+    const BADGE_COLORS = ['#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1']
+    for (const msg of messages) {
+      if (msg.kind !== 'prediction' || msg.predictionState !== 'open' || !msg.predictionOptions) continue
+      if (msg.predictionMyVote !== undefined) {
+        const opt = msg.predictionOptions[msg.predictionMyVote]
+        if (opt) {
+          badges.set('__self__', { text: opt.text, color: BADGE_COLORS[msg.predictionMyVote % BADGE_COLORS.length] ?? '#6366f1' })
+        }
+      }
+    }
+    return badges
+  }, [messages])
 
   const resolveReactorName = useCallback(
     (reaction: MessageReaction): string => {
@@ -830,6 +872,15 @@ function ChatView({
       if (localSettings.soundEnabled) playSendSound();
     },
     [onSendPoll, localSettings.soundEnabled],
+  );
+
+  const handleSendPrediction = useCallback(
+    async (title: string, options: string[], durationMs: number, mode: PredictionMode) => {
+      await onSendPrediction(title, options, durationMs, mode)
+      setPredictionCreatorOpen(false)
+      if (localSettings.soundEnabled) playSendSound()
+    },
+    [onSendPrediction, localSettings.soundEnabled],
   );
 
   const handleSendGallery = useCallback(
@@ -2457,6 +2508,20 @@ function ChatView({
             onRevealNotefade={handleRevealNotefade}
             onDestroyNotefade={handleDestroyNotefade}
             onPollVote={isReady ? onPollVote : undefined}
+            predictionId={msg.predictionId}
+            predictionTitle={msg.predictionTitle}
+            predictionOptions={msg.predictionOptions}
+            predictionMyVote={msg.predictionMyVote}
+            predictionDurationMs={msg.predictionDurationMs}
+            predictionCreatedAt={msg.predictionCreatedAt}
+            predictionState={msg.predictionState}
+            predictionWinnerIndex={msg.predictionWinnerIndex}
+            predictionMode={msg.predictionMode}
+            isModerator={msg.predictionCreatorId === '__self__' || (myClientId !== null && msg.predictionCreatorId === myClientId)}
+            onPredictionVote={onPredictionVote}
+            onPredictionChooseOutcome={onPredictionChooseOutcome}
+            onPredictionDelete={onPredictionDelete}
+            predictionBadge={msg.senderId ? predictionBadges.get(msg.senderId) : (msg.sender === 'self' ? predictionBadges.get('__self__') : predictionBadges.get('__peer__'))}
             senderColor={msg.senderId ? identityMap.get(msg.senderId)?.color : undefined}
             resolveReactorName={resolveReactorName}
             onImageLoad={handleImageLoad}
@@ -2526,6 +2591,7 @@ function ChatView({
         onSendFile={handleSendFile}
         fileError={fileError}
         onOpenPollCreator={() => setPollCreatorOpen(true)}
+        onOpenPredictionCreator={() => setPredictionCreatorOpen(true)}
         onOpenPhotoComposer={() => setPhotoComposerOpen(true)}
         onCameraCapture={handleCameraCapture}
         onOpenNotefadeComposer={() => setNotefadeComposerOpen(true)}
@@ -2538,6 +2604,12 @@ function ChatView({
           onClose={() => setPollCreatorOpen(false)}
           recentEmojis={recentEmojis}
           onTrackEmoji={trackEmoji}
+        />
+      )}
+      {predictionCreatorOpen && (
+        <PredictionCreator
+          onSend={handleSendPrediction}
+          onClose={() => setPredictionCreatorOpen(false)}
         />
       )}
       {photoComposerOpen && (

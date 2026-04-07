@@ -17,5 +17,8 @@ export type {
   ChatMessage as GroupChatMessage,
   MessageReaction,
   PollOption,
+  PredictionOption,
+  PredictionState,
+  PredictionMode,
   GalleryImage,
 } from './chat-helpers'
