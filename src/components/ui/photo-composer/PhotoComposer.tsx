@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { EmojiFullPicker } from '../emoji-picker'
 import { IconViewOnce, IconEmoji } from '../icons'
-import { GALLERY_MAX_IMAGES, GALLERY_IMAGE_ACCEPT, FILE_MAX_IMAGE_BYTES, IMAGE_MIME_TYPES, MAX_MESSAGE_LENGTH } from '@/constants'
+import { GALLERY_MAX_IMAGES, GALLERY_MEDIA_ACCEPT, FILE_MAX_IMAGE_BYTES, IMAGE_MIME_TYPES, VIDEO_MIME_TYPES, MAX_MESSAGE_LENGTH } from '@/constants'
 import styles from './PhotoComposer.module.css'
 
 interface PhotoEntry {
@@ -12,13 +12,14 @@ interface PhotoEntry {
 
 interface PhotoComposerProps {
   onSend: (files: File[], caption?: string, timed?: boolean) => void
+  onSendFile?: (file: File) => void
   onClose: () => void
   recentEmojis?: readonly string[]
   onTrackEmoji?: (emoji: string) => void
   initialFiles?: File[]
 }
 
-export function PhotoComposer({ onSend, onClose, recentEmojis = [], onTrackEmoji, initialFiles }: PhotoComposerProps) {
+export function PhotoComposer({ onSend, onSendFile, onClose, recentEmojis = [], onTrackEmoji, initialFiles }: PhotoComposerProps) {
   const [photos, setPhotos] = useState<PhotoEntry[]>([])
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [swapSource, setSwapSource] = useState<number | null>(null)
@@ -74,16 +75,21 @@ export function PhotoComposer({ onSend, onClose, recentEmojis = [], onTrackEmoji
 
   const addFiles = useCallback((files: FileList | File[]) => {
     const fileArray = Array.from(files)
-    const valid = fileArray.filter(f =>
+    const videos = fileArray.filter(f => f.size > 0 && VIDEO_MIME_TYPES.has(f.type))
+    const validImages = fileArray.filter(f =>
       f.size > 0 &&
       f.size <= FILE_MAX_IMAGE_BYTES &&
       IMAGE_MIME_TYPES.has(f.type) &&
       f.type !== 'image/svg+xml'
     )
 
+    if (videos.length > 0 && onSendFile) {
+      videos.forEach(video => onSendFile(video))
+    }
+
     setPhotos(prev => {
       const remaining = GALLERY_MAX_IMAGES - prev.length
-      const toAdd = valid.slice(0, remaining)
+      const toAdd = validImages.slice(0, remaining)
       return [
         ...prev,
         ...toAdd.map(file => ({
@@ -92,7 +98,11 @@ export function PhotoComposer({ onSend, onClose, recentEmojis = [], onTrackEmoji
         })),
       ]
     })
-  }, [])
+
+    if (videos.length > 0 && validImages.length === 0) {
+      onClose()
+    }
+  }, [onSendFile, onClose])
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
@@ -190,7 +200,7 @@ export function PhotoComposer({ onSend, onClose, recentEmojis = [], onTrackEmoji
       <input
         ref={fileInputRef}
         type="file"
-        accept={GALLERY_IMAGE_ACCEPT}
+        accept={GALLERY_MEDIA_ACCEPT}
         multiple
         className={styles.hiddenInput}
         onChange={handleFileChange}

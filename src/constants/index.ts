@@ -37,6 +37,7 @@ export const VIDEO_MIME_TYPES = new Set([
 
 export const GALLERY_MAX_IMAGES = 5
 export const GALLERY_IMAGE_ACCEPT = 'image/jpeg,image/png,image/gif,image/webp,image/bmp,image/avif'
+export const GALLERY_MEDIA_ACCEPT = 'image/jpeg,image/png,image/gif,image/webp,image/bmp,image/avif,video/mp4,video/webm,video/ogg,video/quicktime,video/x-matroska'
 
 export const ROOM_INACTIVITY_TTL_MS = 30 * 60 * 1000 // 30 minutes
 

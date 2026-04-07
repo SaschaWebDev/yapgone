@@ -2655,6 +2655,7 @@ function ChatView({
       {photoComposerOpen && (
         <PhotoComposer
           onSend={handleSendGallery}
+          onSendFile={handleSendFile}
           onClose={() => {
             setPhotoComposerOpen(false);
             setCameraFile(null);
