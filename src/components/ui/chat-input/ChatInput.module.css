@@ -505,6 +505,24 @@
 
   .recordingBar,
   .previewBar {
-    min-height: 2.25rem;
+    min-height: 2rem;
+    padding: 0 0.6rem;
+  }
+
+  .recordingTimer {
+    font-size: 0.8rem;
+  }
+
+  .cancelButton,
+  .pauseButton {
+    width: 2rem;
+    height: 2rem;
+    border-radius: var(--radius-sm);
+  }
+
+  .cancelButton svg,
+  .pauseButton svg {
+    width: 16px;
+    height: 16px;
   }
 }
