@@ -31,7 +31,7 @@ export interface GalleryImage {
 
 export interface ChatMessage {
   id: string
-  kind: 'text' | 'audio' | 'image' | 'file' | 'poll' | 'gallery' | 'notefade' | 'notefade-chat' | 'prediction'
+  kind: 'text' | 'audio' | 'image' | 'video' | 'file' | 'poll' | 'gallery' | 'notefade' | 'notefade-chat' | 'prediction'
   text?: string
   audioUrl?: string
   durationMs?: number
@@ -122,7 +122,7 @@ export function buildAudioMessage(
 
 export function buildFileMessage(
   sender: 'self' | 'peer',
-  kind: 'image' | 'file',
+  kind: 'image' | 'video' | 'file',
   objectUrl: string,
   fileName: string,
   mimeType: string,

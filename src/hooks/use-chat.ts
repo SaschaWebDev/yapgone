@@ -34,11 +34,13 @@ import {
   VOICE_NOTE_MAX_BYTES,
   FILE_MAX_IMAGE_BYTES,
   FILE_MAX_GENERAL_BYTES,
+  FILE_MAX_VIDEO_BYTES,
   FILE_CHUNK_BYTES,
   FILE_ASSEMBLY_TIMEOUT_MS,
   FILE_MAX_CONCURRENT_TRANSFERS,
   FILE_SEND_DELAY_MS,
   IMAGE_MIME_TYPES,
+  VIDEO_MIME_TYPES,
   GALLERY_MAX_IMAGES,
 } from '@/constants'
 
@@ -85,7 +87,7 @@ export interface GalleryImage {
 
 export interface ChatMessage {
   id: string
-  kind: 'text' | 'audio' | 'image' | 'file' | 'poll' | 'gallery' | 'notefade' | 'notefade-chat' | 'prediction'
+  kind: 'text' | 'audio' | 'image' | 'video' | 'file' | 'poll' | 'gallery' | 'notefade' | 'notefade-chat' | 'prediction'
   text?: string
   audioUrl?: string
   durationMs?: number
@@ -382,7 +384,15 @@ interface FileAssembly {
 }
 
 function fileMaxBytes(mimeType: string): number {
-  return IMAGE_MIME_TYPES.has(mimeType) ? FILE_MAX_IMAGE_BYTES : FILE_MAX_GENERAL_BYTES
+  if (IMAGE_MIME_TYPES.has(mimeType)) return FILE_MAX_IMAGE_BYTES
+  if (VIDEO_MIME_TYPES.has(mimeType)) return FILE_MAX_VIDEO_BYTES
+  return FILE_MAX_GENERAL_BYTES
+}
+
+function detectFileKind(mimeType: string): 'image' | 'video' | 'file' {
+  if (IMAGE_MIME_TYPES.has(mimeType)) return 'image'
+  if (VIDEO_MIME_TYPES.has(mimeType)) return 'video'
+  return 'file'
 }
 
 interface VoiceNoteAssembly {
@@ -492,7 +502,7 @@ function buildTextMessage(
 
 function buildFileMessage(
   sender: 'self' | 'peer',
-  kind: 'image' | 'file',
+  kind: 'image' | 'video' | 'file',
   objectUrl: string,
   fileName: string,
   mimeType: string,
@@ -1001,7 +1011,7 @@ export function useChatAsCreator(
         timed: payload.timed || undefined,
         ts: payload.ts,
       })
-      const msgKind = IMAGE_MIME_TYPES.has(payload.mimeType) ? 'image' as const : 'file' as const
+      const msgKind = detectFileKind(payload.mimeType)
       setMessages(prev => _insertSorted(prev, {
         ...buildFileMessage(
           sender, msgKind, '', payload.fileName,
@@ -1063,7 +1073,7 @@ export function useChatAsCreator(
     const blob = new Blob([arrayBuffer], { type: assembly.mimeType })
     const objectUrl = URL.createObjectURL(blob)
     trackFileUrl(objectUrl)
-    const msgKind = IMAGE_MIME_TYPES.has(assembly.mimeType) ? 'image' as const : 'file' as const
+    const msgKind = detectFileKind(assembly.mimeType)
     setMessages(prev => prev.map(m =>
       m.id === payload.fileId ? {
         ...buildFileMessage(
@@ -1663,7 +1673,7 @@ export function useChatAsCreator(
     // Show local message immediately with progress
     const objectUrl = URL.createObjectURL(file)
     trackFileUrl(objectUrl)
-    const msgKind = IMAGE_MIME_TYPES.has(file.type) ? 'image' as const : 'file' as const
+    const msgKind = detectFileKind(file.type)
     setMessages(prev => _insertSorted(prev, {
       ...buildFileMessage(
         'self', msgKind, objectUrl, file.name,
@@ -2299,7 +2309,7 @@ export function useChatAsJoiner(
         timed: payload.timed || undefined,
         ts: payload.ts,
       })
-      const msgKind = IMAGE_MIME_TYPES.has(payload.mimeType) ? 'image' as const : 'file' as const
+      const msgKind = detectFileKind(payload.mimeType)
       setMessages(prev => _insertSorted(prev, {
         ...buildFileMessage(
           sender, msgKind, '', payload.fileName,
@@ -2361,7 +2371,7 @@ export function useChatAsJoiner(
     const fileBlob = new Blob([arrayBuffer2], { type: assembly.mimeType })
     const objectUrl = URL.createObjectURL(fileBlob)
     trackFileUrl(objectUrl)
-    const msgKind = IMAGE_MIME_TYPES.has(assembly.mimeType) ? 'image' as const : 'file' as const
+    const msgKind = detectFileKind(assembly.mimeType)
     setMessages(prev => prev.map(m =>
       m.id === payload.fileId ? {
         ...buildFileMessage(
@@ -2947,7 +2957,7 @@ export function useChatAsJoiner(
 
     const fileObjectUrl = URL.createObjectURL(file)
     trackFileUrl(fileObjectUrl)
-    const msgKind = IMAGE_MIME_TYPES.has(file.type) ? 'image' as const : 'file' as const
+    const msgKind = detectFileKind(file.type)
     setMessages(prev => _insertSorted(prev, {
       ...buildFileMessage(
         'self', msgKind, fileObjectUrl, file.name,
