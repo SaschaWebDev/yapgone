@@ -66,17 +66,19 @@ export class ChatRoom extends DurableObject {
       : false
     const hasDeparting = !!departingRecord && !isStaleDeparting
 
-    let duplicateSocket: WebSocket | null = null
+    // Collect ALL existing sockets carrying this clientId. Multiple zombies
+    // can exist if previous reconnect cycles left sockets that haven't fully
+    // closed yet — we must replace EVERY one of them, not just the first.
+    const duplicateSockets: WebSocket[] = []
     for (const ws of existingSockets) {
       const raw = ws.deserializeAttachment()
       const parsed = ClientAttachmentSchema.safeParse(raw)
       if (parsed.success && parsed.data.id === clientId) {
-        duplicateSocket = ws
-        break
+        duplicateSockets.push(ws)
       }
     }
 
-    const isResume = hasDeparting || duplicateSocket !== null
+    const isResume = hasDeparting || duplicateSockets.length > 0
 
     if (!isResume) {
       // New client: count occupied slots = unique active cids + non-stale departing cids
@@ -107,16 +109,16 @@ export class ChatRoom extends DurableObject {
       }
     }
 
-    // Close any duplicate active socket for this clientId (e.g. second tab,
-    // or a stale connection that hasn't fired close yet).
-    if (duplicateSocket) {
+    // Close every duplicate active socket for this clientId (zombies, second
+    // tab, stale connections that haven't fired close yet).
+    for (const dup of duplicateSockets) {
       try {
-        const raw = duplicateSocket.deserializeAttachment()
+        const raw = dup.deserializeAttachment()
         const att = ClientAttachmentSchema.safeParse(raw)
         if (att.success) {
-          duplicateSocket.serializeAttachment({ ...att.data, leftExplicitly: true })
+          dup.serializeAttachment({ ...att.data, leftExplicitly: true })
         }
-        duplicateSocket.close(1000, 'Replaced by reconnect')
+        dup.close(1000, 'Replaced by reconnect')
       } catch {
         // ignore
       }
@@ -134,14 +136,25 @@ export class ChatRoom extends DurableObject {
     const attachment: ClientAttachment = { id: clientId, messageTimestamps: [] }
     serverWs.serializeAttachment(attachment)
 
-    // Recompute the post-acceptance roster (excluding the duplicate we just closed)
-    const roster = this.ctx.getWebSockets().filter(s => s !== serverWs && s !== duplicateSocket)
-    const rosterCids = new Set<string>()
-    for (const ws of roster) {
+    // Recompute the post-acceptance roster. Build the unique cid set from the
+    // FULL socket list (deduped naturally by Set) and subtract this client's
+    // own cid. This is robust against zombie sockets that might still be in
+    // getWebSockets() carrying this clientId — they cannot inflate the count.
+    const duplicateSet = new Set(duplicateSockets)
+    const allCids = new Set<string>()
+    for (const ws of this.ctx.getWebSockets()) {
+      if (ws === serverWs) continue
+      if (duplicateSet.has(ws)) continue
       const raw = ws.deserializeAttachment()
       const parsed = ClientAttachmentSchema.safeParse(raw)
-      if (parsed.success) rosterCids.add(parsed.data.id)
+      if (parsed.success && parsed.data.id !== clientId) {
+        allCids.add(parsed.data.id)
+      }
     }
+    const rosterCids = allCids
+    const roster = this.ctx.getWebSockets().filter(
+      s => s !== serverWs && !duplicateSet.has(s),
+    )
     const clientCount = rosterCids.size + 1
 
     if (rosterCids.size > 0) {
@@ -211,7 +224,15 @@ export class ChatRoom extends DurableObject {
         // Server-handled command: participant leaves
         if (parsed.type === 'leave') {
           const remaining = this.ctx.getWebSockets().filter(s => s !== ws)
-          const clientCount = remaining.length
+          const remainingCids = new Set<string>()
+          for (const peer of remaining) {
+            const peerRaw = peer.deserializeAttachment()
+            const peerParsed = ClientAttachmentSchema.safeParse(peerRaw)
+            if (peerParsed.success && peerParsed.data.id !== client.id) {
+              remainingCids.add(peerParsed.data.id)
+            }
+          }
+          const clientCount = remainingCids.size
           for (const peer of remaining) {
             try {
               peer.send(JSON.stringify({
