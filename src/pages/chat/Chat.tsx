@@ -98,7 +98,7 @@ export function Chat({ roomId, creatorPubKey, roomSettings }: ChatProps) {
     roomSettings ?? DEFAULT_ROOM_SETTINGS,
   );
   const isCreator =
-    sessionStorage.getItem(`${STORAGE_KEYS.CREATOR_PREFIX}${roomId}`) === '1';
+    localStorage.getItem(`${STORAGE_KEYS.CREATOR_PREFIX}${roomId}`) === '1';
   const [safeWordPassed, setSafeWordPassed] = useState(false);
 
   if (isCreator) {

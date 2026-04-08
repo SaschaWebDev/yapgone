@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react'
 import { generateKeyPair, exportPublicKey, toBase64Url, xorSplit } from '@/crypto'
 import { createRoom, storeShard, buildSplitInviteFragment } from '@/api'
 import { STORAGE_KEYS } from '@/constants'
+import { DEFAULT_ROOM_SETTINGS } from '@/room-settings'
 import styles from './Home.module.css'
 
 export function Home() {
@@ -15,7 +16,7 @@ export function Home() {
 
     try {
       const kp = await generateKeyPair()
-      const roomId = await createRoom()
+      const roomId = await createRoom(DEFAULT_ROOM_SETTINGS.maxParticipants)
       const pubKeyRaw = await exportPublicKey(kp.publicKey)
 
       // XOR-split the pubkey: URL share + server shard
@@ -28,7 +29,7 @@ export function Home() {
 
       const fragment = buildSplitInviteFragment(roomId, urlShareB64)
 
-      sessionStorage.setItem(`${STORAGE_KEYS.CREATOR_PREFIX}${roomId}`, '1')
+      localStorage.setItem(`${STORAGE_KEYS.CREATOR_PREFIX}${roomId}`, '1')
       window.location.hash = fragment
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create room')
