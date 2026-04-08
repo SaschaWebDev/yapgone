@@ -3,10 +3,10 @@ import { STORAGE_KEYS } from '@/constants'
 const cache = new Map<string, string>()
 
 /**
- * Returns a stable per-tab client identifier for the given room. Stored in
- * sessionStorage so the same identity survives WebSocket reconnects after
- * mobile backgrounding (iOS Safari) without colliding with other tabs.
- * Falls back to an in-memory UUID if storage is unavailable.
+ * Returns a stable per-room client identifier. Stored in localStorage so the
+ * same identity survives mobile tab eviction (iOS Safari can wipe
+ * sessionStorage when reloading a backgrounded tab). Cleared on explicit
+ * leave via clearClientId so a fresh visit gets a new identity.
  */
 export function getOrCreateClientId(roomId: string): string {
   const cached = cache.get(roomId)
@@ -14,13 +14,13 @@ export function getOrCreateClientId(roomId: string): string {
 
   const key = `${STORAGE_KEYS.CLIENT_ID_PREFIX}${roomId}`
   try {
-    const existing = sessionStorage.getItem(key)
+    const existing = localStorage.getItem(key)
     if (existing) {
       cache.set(roomId, existing)
       return existing
     }
     const id = crypto.randomUUID()
-    sessionStorage.setItem(key, id)
+    localStorage.setItem(key, id)
     cache.set(roomId, id)
     return id
   } catch {
@@ -37,7 +37,7 @@ export function getOrCreateClientId(roomId: string): string {
 export function clearClientId(roomId: string): void {
   cache.delete(roomId)
   try {
-    sessionStorage.removeItem(`${STORAGE_KEYS.CLIENT_ID_PREFIX}${roomId}`)
+    localStorage.removeItem(`${STORAGE_KEYS.CLIENT_ID_PREFIX}${roomId}`)
   } catch {
     // ignore
   }

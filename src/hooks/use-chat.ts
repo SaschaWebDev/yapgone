@@ -1216,8 +1216,8 @@ export function useChatAsCreator(
         setInviteUrl(url)
         window.location.hash = fragment
 
-        // Mark as creator in sessionStorage
-        sessionStorage.setItem(`yapgone-creator-${roomId}`, '1')
+        // Mark as creator (localStorage so it survives mobile tab eviction)
+        localStorage.setItem(`yapgone-creator-${roomId}`, '1')
 
         setPhase('waiting')
 
