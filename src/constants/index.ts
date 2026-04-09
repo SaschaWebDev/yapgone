@@ -83,7 +83,6 @@ export const GROUP_VOICE_MAGIC_BYTE = 0xAA
 export const GROUP_VOICE_MAX_PARTICIPANTS = 10
 export const GROUP_VOICE_JITTER_BUFFER_SIZE = 3
 
-export const MAX_GROUP_SIZE = 50
 export const DEFAULT_MAX_PARTICIPANTS = 2
 
 export const STORAGE_KEYS = {
