@@ -11,39 +11,49 @@
     <img src="https://img.shields.io/badge/Cloudflare-Workers-orange?logo=cloudflare&logoColor=white" alt="Cloudflare Workers" />
   </p>
 
-  <img src="docs/yapgone-demo.gif" alt="yapgone demo" width="600" />
+  <!-- TODO: record and add a demo gif at docs/yapgone-demo.gif then re-enable -->
+  <!-- <img src="docs/yapgone-demo.gif" alt="yapgone demo" width="600" /> -->
 </div>
 
 ---
 
-yapgone is an ephemeral, end-to-end encrypted chat app for private conversations and groups of up to 200. Text, voice notes, files, images, polls, and voice calls — all encrypted client-side, relayed through a zero-knowledge server, and gone when you're done. No accounts, no cookies, no history. Close the tab, and the conversation never existed.
+yapgone is an ephemeral, end-to-end encrypted chat app for private conversations and groups of up to 20 users. Text, voice notes, inline videos, photos, files, polls, predictions, voice calls, video calls, and group voice — all encrypted client-side, relayed through a zero-knowledge server, and gone when you're done. No accounts, no cookies, no history. Close the tab, and the conversation never existed.
 
 Under the hood, yapgone uses a Signal-like double ratchet for 1-to-1 chats and a sender key protocol with ECDSA signing for groups. All cryptography runs in the browser via the Web Crypto API — zero external crypto dependencies. The server is a stateless relay that never sees plaintext, keys, or identities. Everything lives in browser memory and vanishes on tab close or room expiry.
 
 ## ✨ Features
 
 **Messaging**
+
 - Text messages with inline replies and emoji reactions
 - 15-second timed messages that self-destruct after viewing
 - Voice notes (up to 120s) with waveform visualization and playback speed control
 - View-once voice notes
-- File sharing (up to 10 MiB, chunked transfer)
-- Photo galleries (up to 5 images, lightbox with zoom and pan)
+- Inline video messages (mp4, webm, ogg, quicktime, x-matroska — up to 50 MiB, played with native browser controls)
+- Photo galleries (up to 5 images per gallery, 15 MiB per photo, lightbox with zoom and pan; the picker also accepts videos which are dispatched as individual video messages)
 - Camera capture (direct photo from device camera)
+- File sharing (up to 10 MiB for general files, chunked transfer)
 - Polls (up to 20 options)
-- Notefade integration (self-destructing notes with client-side BYOK encryption)
+- Predictions (yes/no or custom outcomes, time-limited voting, moderator-resolved outcome with a pulsing CTA when voting closes)
+- Notefade integration (URL-based self-destructing notes with client-side BYOK encryption)
+- In-chat self-destructing notes (`notefade-chat` kind — sender writes the note inside the chat, recipient reveals once, then it's destroyed for everyone)
 
 **Voice & Screen**
-- WebRTC voice calls with optional E2EE (AES-256-GCM frame encryption)
+
+- 1-on-1 voice calls with optional E2EE (AES-256-GCM frame encryption via WebRTC Encoded Transforms in a dedicated Web Worker)
+- 1-on-1 video calls with the same E2EE on the video track
+- Group voice for 3–10 participants over the encrypted WebSocket relay (no WebRTC mesh; the worker forwards opaque encrypted frames)
 - Screen sharing with floating draggable window
 
 **Group Chat**
-- 2–200 participants (default 50)
+
+- 2–20 participants (default 2; the slider in the room settings lets the creator pick anywhere in this range)
 - Sender key protocol with ECDSA P-256 signing
 - Automatic rekey on member departure
 - Pairwise ECDH ratchets for sender key distribution
 
 **Security**
+
 - Double ratchet protocol (forward secrecy + future secrecy)
 - Safety numbers (60-digit fingerprint verification)
 - Safeword room protection (PBKDF2-SHA256, 120,000 iterations)
@@ -51,12 +61,15 @@ Under the hood, yapgone uses a Signal-like double ratchet for 1-to-1 chats and a
 - Cryptographic erasure (keys zeroed on room close)
 
 **Privacy**
+
 - No accounts, no cookies, no tracking
 - Zero-knowledge relay server
 - 30-minute room inactivity expiry
-- Everything in-memory, nothing persisted
+- Everything in-memory, nothing persisted (server stores only the per-room `maxClients` config and transient reconnect grace records)
+- Mobile-friendly reconnect — the same identity is preserved across iOS Safari tab evictions and short backgrounding via a per-tab `cid` in `localStorage`. The worker recognizes reconnects with the same `cid` as resumes within an 8-second grace window, so the participant count never inflates and the slot is held while the user is briefly away.
 
 **UX**
+
 - Dark and light themes
 - QR code sharing
 - Web Share API support
@@ -107,7 +120,7 @@ Under the hood, yapgone uses a Signal-like double ratchet for 1-to-1 chats and a
     │                              │                 │ XOR-combine │
     │                              │                 │ → pubkey    │
     │                              │                              │
-    ├──WebSocket /ws/:roomId──────►│◄──WebSocket────────────────── ┤
+    ├──WebSocket /ws/:roomId?cid=──►│◄──WebSocket /ws/:roomId?cid=──┤
     │                              │                              │
     │◄═══════ pubkey exchange (via relay) ═══════════════════════►│
     │          ECDH → shared secret → HKDF → root key            │
@@ -123,6 +136,45 @@ Under the hood, yapgone uses a Signal-like double ratchet for 1-to-1 chats and a
     │  destroyState() → keys zeroed                keys zeroed   │
 ```
 
+**Reconnect resume** (mobile background, network blip, iOS tab eviction):
+
+```
+  Client                           Server
+    │                                 │
+    │  WS_old closes (network blip)   │
+    │═════════ X ════════════════════▶│
+    │                                 │  webSocketClose:
+    │                                 │  store departing:{cid}
+    │                                 │  schedule finalizeDeparture(+8s)
+    │                                 │  (peer-left NOT fired yet)
+    │                                 │
+    │                                 │
+    │  reconnect with same cid        │
+    ├──WebSocket /ws/:roomId?cid=A───▶│
+    │                                 │  duplicate? yes → close old socket
+    │                                 │  departing:A exists → resume
+    │                                 │  delete departing:A
+    │                                 │  accept new socket
+    │                                 │  peer-joined SUPPRESSED (resume)
+    │◄──── peer-list { yourId: A } ───┤
+    │                                 │
+    │  state preserved → no-op        │
+    │                                 │
+    │     ... or, if grace expired (>8s):
+    │                                 │
+    │                                 │  finalizeDeparture fires
+    │                                 │  → peer-left { cid: A } to peers
+    │                                 │  → slot freed
+    │                                 │
+    │  reconnect with same cid        │
+    ├──WebSocket /ws/:roomId?cid=A───▶│
+    │                                 │  no duplicate, no departing
+    │                                 │  capacity check (unique cids only)
+    │                                 │  accept as fresh join
+    │                                 │  peer-joined → fellow peers
+    │                                 │  re-key exchange
+```
+
 ## 🔐 Cryptographic Protocol
 
 ### Key Exchange (ECDH P-256)
@@ -136,6 +188,7 @@ Neither the shared secret nor private keys ever leave the client. The server onl
 ### Symmetric Encryption (AES-256-GCM)
 
 All message payloads are encrypted with AES-256-GCM:
+
 - **256-bit keys** derived per-message from the ratchet chain
 - **12-byte random IVs** generated via `crypto.getRandomValues`
 - **16-byte authentication tags** (GCM standard)
@@ -227,11 +280,13 @@ This provides **information-theoretic security**: either share alone is uniforml
 Voice call audio frames are encrypted using WebRTC Encoded Transforms in a dedicated Web Worker:
 
 **Frame wire format:**
+
 ```
 [4-byte counter BE | 12-byte IV | encrypted payload + 16-byte GCM tag]
 ```
 
 **IV construction:**
+
 ```
 [4-byte random session salt | 4-byte zero padding | 4-byte counter BE]
 ```
@@ -321,56 +376,60 @@ No security tool is a silver bullet. yapgone is designed for ephemeral private c
 
 ### What the relay CAN observe
 
-| Data | Details |
-|------|---------|
-| Room ID | UUID, randomly generated per room |
-| Client IDs | UUIDs assigned on WebSocket connect, not linked to identities |
+| Data               | Details                                                        |
+| ------------------ | -------------------------------------------------------------- |
+| Room ID            | UUID, randomly generated per room                              |
+| Client IDs         | UUIDs assigned on WebSocket connect, not linked to identities  |
 | Message type field | `pubkey`, `message`, `direct`, `typing`, `leave`, `close-room` |
-| Typing status | Whether a client is currently typing (boolean) |
-| Join/leave timing | When each client connected and disconnected |
-| Participant count | Number of active WebSocket connections per room |
-| Source IPs | Visible via `CF-Connecting-IP` header |
-| Message sizes | Byte length of each WebSocket frame |
-| Message timing | When each message was relayed |
+| Typing status      | Whether a client is currently typing (boolean)                 |
+| Join/leave timing  | When each client connected and disconnected                    |
+| Participant count  | Number of active WebSocket connections per room                |
+| Source IPs         | Visible via `CF-Connecting-IP` header                          |
+| Message sizes      | Byte length of each WebSocket frame                            |
+| Message timing     | When each message was relayed                                  |
 
 ### What the relay CANNOT observe
 
-| Data | Why |
-|------|-----|
-| Message content | Encrypted client-side with AES-256-GCM before reaching the server |
-| Encryption keys | Generated and used entirely in the browser; never transmitted in cleartext |
-| Public keys | Exchanged via encrypted WebSocket messages; server relays opaque payloads |
-| User identities | No accounts, no authentication, no cookies — just ephemeral UUIDs |
-| File contents | Encrypted and chunked client-side before transmission |
-| Voice note contents | Encrypted client-side before transmission |
-| Image contents | Encrypted client-side before transmission |
-| Voice call audio | Encrypted via WebRTC Encoded Transforms; server is not in the media path |
+| Data                | Why                                                                        |
+| ------------------- | -------------------------------------------------------------------------- |
+| Message content     | Encrypted client-side with AES-256-GCM before reaching the server          |
+| Encryption keys     | Generated and used entirely in the browser; never transmitted in cleartext |
+| Public keys         | Exchanged via encrypted WebSocket messages; server relays opaque payloads  |
+| User identities     | No accounts, no authentication, no cookies — just ephemeral UUIDs          |
+| File contents       | Encrypted and chunked client-side before transmission                      |
+| Voice note contents | Encrypted client-side before transmission                                  |
+| Image contents      | Encrypted client-side before transmission                                  |
+| Voice call audio    | Encrypted via WebRTC Encoded Transforms; server is not in the media path   |
 
 ### What the relay does NOT store
 
-Messages are relayed in real-time to connected WebSocket peers and immediately discarded. The server stores:
+Messages are relayed in real-time to connected WebSocket peers and immediately discarded. The only persisted state on the server side is operational metadata, never message content or identities:
 
-- **Nothing** — no messages, no keys, no user data, no chat history, no connection logs
+- **DO storage**: per-room `maxClients` configuration, plus transient `departing:{clientId}` records that auto-expire after the 8-second reconnect grace window
+- **KV**: invite shards keyed by `shard:{roomId}`, 1-hour TTL, deleted on first read
+
+No messages, no keys, no user profiles, no chat history, no connection logs.
 
 ### KV storage (invite shards only)
 
-| Property | Value |
-|----------|-------|
-| Key format | `shard:{roomId}` |
-| Value | Base64url-encoded XOR share (useless without the URL share) |
-| TTL | 1 hour |
-| Read policy | Deleted on first GET (one-time read) |
+| Property    | Value                                                       |
+| ----------- | ----------------------------------------------------------- |
+| Key format  | `shard:{roomId}`                                            |
+| Value       | Base64url-encoded XOR share (useless without the URL share) |
+| TTL         | 1 hour                                                      |
+| Read policy | Deleted on first GET (one-time read)                        |
 
 ### Durable Object state
 
-| Property | Persistence |
-|----------|-------------|
-| Client IDs | In-memory only (WebSocket attachment) |
-| Client count | Derived from active connections |
-| Max participants | Stored in DO storage (configurable per room) |
-| WebSocket connections | Transient (closed on room expiry) |
-| Inactivity alarm | DO alarm, reset on each message |
-| `peerHasJoined` flag | In-memory only (prevents solo-creator expiry) |
+| Property                          | Persistence                                                                 |
+| --------------------------------- | --------------------------------------------------------------------------- |
+| Client IDs                        | In-memory only (WebSocket attachment, per-tab `cid` from query string)      |
+| Client count                      | Derived from unique active client IDs (deduped, never raw socket count)     |
+| Max participants                  | Stored in DO storage (configurable per room)                                |
+| `departing:{clientId}` records    | DO storage, auto-expires after 8s grace window for reconnect resume         |
+| WebSocket connections             | Transient (closed on room expiry)                                           |
+| Inactivity alarm                  | DO alarm, reset on each message                                             |
+| `peerHasJoined` flag              | In-memory only (prevents solo-creator expiry)                               |
 
 That's it. No message logs, no key material, no user profiles.
 
@@ -382,23 +441,24 @@ That's it. No message logs, no key material, no user profiles.
 4. **Link sharing** — creator sends the invite link via any external channel
 5. **Joining** — joiner opens the link, fetches Share 2 from KV (one-time read), reconstructs the public key
 6. **Handshake** — both peers connect via WebSocket, exchange public keys, perform ECDH, initialize the double ratchet
-7. **Active chat** — all messages are ratchet-encrypted (1-to-1) or sender-key-encrypted (group)
-8. **Group expansion** — new members trigger pairwise ratchet setup and sender key distribution with all existing members
-9. **Member departure** — departing member's keys are destroyed; all remaining members rekey their sender keys
-10. **Room expiry** — after 30 minutes of inactivity, the DO alarm fires, sends `room-expired` to all clients, closes all WebSocket connections, and deletes all DO storage
+7. **Reconnect resume** — every WebSocket connect carries a per-tab `cid` query parameter generated on first visit and stored in `localStorage`. If a connection drops (network blip, mobile backgrounding, iOS tab eviction), the next reconnect with the same `cid` is treated as a resume: the worker closes any duplicate sockets, restores the slot from a `departing:` record if within the 8-second grace window, and suppresses `peer-joined` notifications so the participant count stays stable. Capacity is enforced on **unique active cids + non-stale departing cids**, so a backgrounded user's slot is reserved while the cap remains a hard limit.
+8. **Active chat** — all messages are ratchet-encrypted (1-to-1) or sender-key-encrypted (group)
+9. **Group expansion** — new members trigger pairwise ratchet setup and sender key distribution with all existing members
+10. **Member departure** — departing member's keys are destroyed; all remaining members rekey their sender keys
+11. **Room expiry** — after 30 minutes of inactivity, the DO alarm fires, sends `room-expired` to all clients, closes all WebSocket connections, and deletes all DO storage
 
 ## 📡 API
 
 ### REST Endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/rooms` | Create a new room. Optional `{ maxClients: 2–200 }`. Returns `{ roomId }`. |
-| `PATCH` | `/api/rooms/:id/config` | Update room config (max participants). |
-| `POST` | `/api/rooms/:id/shard` | Store an XOR share for invite splitting. Body: `{ shard }`. |
-| `GET` | `/api/rooms/:id/shard` | Fetch and delete a shard (one-time read). Returns `{ shard }`. |
-| `POST` | `/api/notefade/create-note` | Proxy to notefade API. Body: `{ text }` (plaintext or BYOK-encrypted, max 8000 chars). Returns `{ url }`. |
-| `POST` | `/api/notefade/read-note` | Proxy to notefade read API. Body: `{ url }`. Returns `{ text }`. |
+| Method  | Path                        | Description                                                                                               |
+| ------- | --------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `POST`  | `/api/rooms`                | Create a new room. Optional `{ maxClients: 2–20 }` (UI-enforced; the worker schema permits up to 200 for direct API callers, but the UI slider caps at 20). Returns `{ roomId }`. |
+| `PATCH` | `/api/rooms/:id/config`     | Update room config — `{ maxClients: 2–20 }`.                                                              |
+| `POST`  | `/api/rooms/:id/shard`      | Store an XOR share for invite splitting. Body: `{ shard }`.                                               |
+| `GET`   | `/api/rooms/:id/shard`      | Fetch and delete a shard (one-time read). Returns `{ shard }`.                                            |
+| `POST`  | `/api/notefade/create-note` | Proxy to notefade API. Body: `{ text }` (plaintext or BYOK-encrypted, max 8000 chars). Returns `{ url }`. |
+| `POST`  | `/api/notefade/read-note`   | Proxy to notefade read API. Body: `{ url }`. Returns `{ text }`.                                          |
 
 Six REST endpoints. That's the entire backend.
 
@@ -406,30 +466,30 @@ Six REST endpoints. That's the entire backend.
 
 ### WebSocket Protocol
 
-Connect via `GET /ws/:roomId` with an `Upgrade: websocket` header.
+Connect via `GET /ws/:roomId?cid={uuid}` with an `Upgrade: websocket` header. The `cid` is a per-tab UUID stored in `localStorage` per room (key `yapgone-client-id-{roomId}`); reconnects with the same `cid` are treated as resumes by the worker. If `cid` is omitted (legacy clients), the worker generates one server-side and resume support is disabled for that connection.
 
 **Client → Server:**
 
-| Type | Fields | Description |
-|------|--------|-------------|
-| `pubkey` | `key` | Send public key to relay during handshake |
-| `message` | `header`, `payload` | Ratchet-encrypted broadcast message |
-| `direct` | `targetId`, `payload` | Encrypted message to a specific peer (sender key distribution) |
-| `typing` | `active` | Typing indicator (boolean) |
-| `leave` | — | Graceful departure; triggers `peer-left` to others |
-| `close-room` | — | Close room for everyone; triggers `room-closed` to all |
+| Type         | Fields                | Description                                                    |
+| ------------ | --------------------- | -------------------------------------------------------------- |
+| `pubkey`     | `key`                 | Send public key to relay during handshake                      |
+| `message`    | `header`, `payload`   | Ratchet-encrypted broadcast message                            |
+| `direct`     | `targetId`, `payload` | Encrypted message to a specific peer (sender key distribution) |
+| `typing`     | `active`              | Typing indicator (boolean)                                     |
+| `leave`      | —                     | Graceful departure; triggers `peer-left` to others             |
+| `close-room` | —                     | Close room for everyone; triggers `room-closed` to all         |
 
 **Server → Client:**
 
-| Type | Fields | Description |
-|------|--------|-------------|
-| `peer-joined` | `clientId`, `clientCount` | A new peer connected |
-| `peer-left` | `clientId`, `clientCount` | A peer disconnected or left |
-| `peer-list` | `clientIds`, `yourId` | Sent on connect: list of existing peers and your assigned ID |
-| `room-full` | — | Room has reached max participants |
-| `room-expired` | — | Room expired due to inactivity |
-| `room-closed` | — | Room was explicitly closed by a participant |
-| `error` | `code`, `message` | Error (rate limit, invalid JSON, message too large, etc.) |
+| Type           | Fields                    | Description                                                  |
+| -------------- | ------------------------- | ------------------------------------------------------------ |
+| `peer-joined`  | `clientId`, `clientCount` | A new peer connected                                         |
+| `peer-left`    | `clientId`, `clientCount` | A peer disconnected or left                                  |
+| `peer-list`    | `clientIds`, `yourId`     | Sent on connect: list of existing peers and your assigned ID |
+| `room-full`    | —                         | Room has reached max participants                            |
+| `room-expired` | —                         | Room expired due to inactivity                               |
+| `room-closed`  | —                         | Room was explicitly closed by a participant                  |
+| `error`        | `code`, `message`         | Error (rate limit, invalid JSON, message too large, etc.)    |
 
 **Limits**: 60 messages per second per client. Maximum message size: 32 KB.
 
@@ -449,6 +509,7 @@ yarn worker:deploy
 ```
 
 Requires a Cloudflare account with:
+
 - **Workers** — runs the relay logic
 - **Durable Objects** — one `ChatRoom` instance per room
 - **KV namespace** — stores invite shards (configure `INVITE_SHARDS` binding in `wrangler.toml`)
@@ -458,6 +519,7 @@ Update the `wrangler.toml` KV namespace ID and any other bindings before deployi
 ## 🚀 Getting Started
 
 **Prerequisites:**
+
 - Node.js 20+
 - Yarn Classic (`npm install -g yarn`)
 
@@ -488,20 +550,20 @@ yarn typecheck     # TypeScript type checking only
 
 ## 🧰 Tech Stack
 
-| Technology | Role |
-|------------|------|
-| React 19 | UI framework |
-| TypeScript 5.7+ (strict) | Type safety |
-| Vite 6 | Build tool and dev server |
-| CSS Modules | Scoped component styling (no Tailwind) |
-| Web Crypto API | All cryptographic operations (zero external deps) |
-| WebSocket + WebRTC | Real-time messaging and voice calls |
-| Cloudflare Workers | Edge-deployed backend relay |
-| Cloudflare Durable Objects | Per-room state and WebSocket management |
-| Cloudflare KV | Invite shard storage (1h TTL) |
-| Zod | Runtime schema validation |
-| Vitest | Unit testing |
-| qrcode | QR code generation for invite links |
+| Technology                 | Role                                              |
+| -------------------------- | ------------------------------------------------- |
+| React 19                   | UI framework                                      |
+| TypeScript 5.7+ (strict)   | Type safety                                       |
+| Vite 6                     | Build tool and dev server                         |
+| CSS Modules                | Scoped component styling (no Tailwind)            |
+| Web Crypto API             | All cryptographic operations (zero external deps) |
+| WebSocket + WebRTC         | Real-time messaging and voice calls               |
+| Cloudflare Workers         | Edge-deployed backend relay                       |
+| Cloudflare Durable Objects | Per-room state and WebSocket management           |
+| Cloudflare KV              | Invite shard storage (1h TTL)                     |
+| Zod                        | Runtime schema validation                         |
+| Vitest                     | Unit testing                                      |
+| qrcode                     | QR code generation for invite links               |
 
 ## 📁 Project Structure
 
