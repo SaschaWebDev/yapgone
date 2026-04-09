@@ -82,6 +82,12 @@ export interface GalleryImage {
   fileName: string
   mimeType: string
   fileSize: number
+  /**
+   * Local-only: original byte size before compression. Only set on the
+   * sender's local bubble; never sent over the wire. Used by the gallery
+   * bubble to show a "Compressed X → Y" hint to the sender.
+   */
+  originalSize?: number
   transferProgress?: number
 }
 

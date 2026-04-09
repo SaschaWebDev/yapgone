@@ -9,6 +9,7 @@ import {
 import { computeWaveform } from '@/utils';
 import { buildIdentityMap } from '@/utils/sender-identity';
 import { createNotefadeNote, readNotefadeNote } from '@/api';
+import { compressImageForUpload } from '@/lib/picpetite/compress';
 import { generateSafeWord, encryptForNotefade, decryptFromNotefade, deriveNotefadeKeyB64, BYOK_DELIMITER } from '@/crypto';
 import chatBubbleStyles from '@/components/ui/message-bubble/MessageBubble.module.css';
 import {
@@ -552,6 +553,7 @@ interface ChatViewProps {
     files: File[],
     caption?: string,
     timed?: boolean,
+    originalSizes?: number[],
   ) => Promise<void>;
   onSendNotefade: (url: string) => Promise<void>;
   onSendNotefadeChat: (url: string) => Promise<void>;
@@ -892,8 +894,20 @@ function ChatView({
   );
 
   const handleSendGallery = useCallback(
-    async (files: File[], caption?: string, timed?: boolean) => {
-      await onSendGallery(files, caption, timed);
+    async (files: File[], caption?: string, timed?: boolean, hd?: boolean) => {
+      // Auto-compress to WebP unless HD mode is on. compressImageForUpload
+      // never throws — it falls back to the original file on any failure
+      // (animated, unsupported, error, ineffective). Done in parallel so the
+      // compression of N files takes ~max(t_i) instead of sum(t_i).
+      const results = await Promise.all(
+        files.map((f) => compressImageForUpload(f, { hd })),
+      );
+      const finalFiles = results.map((r) => r.file);
+      // originalSizes is forwarded so the sender's local bubble can show a
+      // "Compressed X → Y" hint. The receiver never sees these numbers —
+      // they don't cross the wire protocol.
+      const originalSizes = results.map((r) => r.originalSize);
+      await onSendGallery(finalFiles, caption, timed, originalSizes);
       setPhotoComposerOpen(false);
       setCameraFile(null);
       if (localSettings.soundEnabled) playSendSound();

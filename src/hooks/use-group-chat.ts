@@ -1814,6 +1814,7 @@ export function useGroupChat(
     files: File[],
     caption?: string,
     timed?: boolean,
+    originalSizes?: number[],
   ) => {
     if (!groupCryptoRef.current || !wsRef.current) return
     const validFiles = files.slice(0, GALLERY_MAX_IMAGES).filter(f =>
@@ -1844,14 +1845,17 @@ export function useGroupChat(
       })),
     })
 
-    // Show local gallery
+    // Show local gallery — includes originalSize so the sender's bubble can
+    // show a "Compressed X → Y" hint. originalSizes is index-aligned with
+    // imageEntries (caller passes them in the same order as `files`).
     setMessages(prev => insertSorted(prev, {
       id: galleryId, kind: 'gallery', text: caption || undefined,
       sender: 'self', displayName: localUsernameRef.current ?? undefined,
       timestamp: ts, reactions: [], timed: timed || undefined,
-      gallery: imageEntries.map(e => ({
+      gallery: imageEntries.map((e, i) => ({
         fileId: e.fileId, fileUrl: e.objectUrl, fileName: e.file.name,
         mimeType: e.file.type, fileSize: e.bytes.length,
+        originalSize: originalSizes?.[i],
       })),
     }))
 
