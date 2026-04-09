@@ -28,7 +28,7 @@ import { createReconnectingWebSocket } from '@/ws/reconnecting-client'
 import type { ReconnectingChatWebSocket } from '@/ws/reconnecting-client'
 import type { VoiceSignal } from '@/types'
 import { buildWsUrl, buildSplitInviteFragment, storeShard, fetchShard, isSplitInvite, updateRoomConfig } from '@/api'
-import { computeWaveform, getOrCreateClientId, clearClientId } from '@/utils'
+import { computeWaveform, getOrCreateClientId } from '@/utils'
 import type { RoomSettings } from '@/room-settings'
 import { DEFAULT_ROOM_SETTINGS, normalizeRoomSettings } from '@/room-settings'
 import {
@@ -321,6 +321,7 @@ export function useGroupChat(
   const [localUsername, setLocalUsername] = useState<string | null>(null)
   const [peerUsernames, setPeerUsernames] = useState<Map<string, string>>(new Map())
   const [mediaKeyRaw, setMediaKeyRaw] = useState<Uint8Array | null>(null)
+  const [participantCount, setParticipantCount] = useState(1)
   const [myClientId, setMyClientId] = useState<string | null>(null)
   const [myPubKeyRaw, setMyPubKeyRaw] = useState<Uint8Array | null>(null)
   const [peerPubKeysMap, setPeerPubKeysMap] = useState<Map<string, Uint8Array>>(new Map())
@@ -939,23 +940,15 @@ export function useGroupChat(
       }
       setTimeout(() => ws.close(), 100)
     }
-    // On explicit leave, drop the persisted identity for this room so a
-    // future visit gets a fresh slate. Background closures (skipLeave=true)
-    // keep the identity so a reconnect can resume the same slot.
-    if (!skipLeave) {
-      try {
-        localStorage.removeItem(`${STORAGE_KEYS.CREATOR_PREFIX}${roomId}`)
-      } catch { /* ignore */ }
-      clearClientId(roomId)
-    }
-  }, [roomId])
+  }, [])
 
   // ─── Main effect ───
   useEffect(() => {
     let cancelled = false
     cleanedUpRef.current = false
 
-    async function handlePeerJoined(peerId: string, _clientCount: number) {
+    async function handlePeerJoined(peerId: string, clientCount: number) {
+      setParticipantCount(clientCount)
       const gc = groupCryptoRef.current
       const ws = wsRef.current
       if (!gc || !ws) return
@@ -970,7 +963,8 @@ export function useGroupChat(
       pendingKeyExchangeRef.current.add(peerId)
     }
 
-    async function handlePeerLeft(peerId: string, _clientCount: number) {
+    async function handlePeerLeft(peerId: string, clientCount: number) {
+      setParticipantCount(clientCount)
       const gc = groupCryptoRef.current
       if (!gc) return
 
@@ -999,7 +993,7 @@ export function useGroupChat(
         await distributeSenderKeyToAll()
       }
 
-      if (peerCount === 0) {
+      if (clientCount === 1) {
         setMessages(prev => [...prev, buildTextMessage('system', 'Everyone else has left')])
         setPhase('peer-left')
       } else {
@@ -1346,6 +1340,7 @@ export function useGroupChat(
               myClientIdRef.current === yourId &&
               groupCryptoRef.current !== null
             ) {
+              setParticipantCount(clientIds.length + 1)
               return
             }
 
@@ -1356,6 +1351,7 @@ export function useGroupChat(
             const gc = await initGroupMember(yourId, kp)
             groupCryptoRef.current = gc
             setMyPubKeyRaw(gc.myPubKeyRaw)
+            setParticipantCount(clientIds.length + 1)
 
             // If joiner, resolve creator pubkey and do ECDH with first peer
             if (role === 'joiner' && creatorPubKeyOrShare) {
@@ -1492,7 +1488,12 @@ export function useGroupChat(
 
     return () => {
       cancelled = true
-      cleanup()
+      // Transient unmount (StrictMode double-mount, hash change, parent
+      // re-render). Tear down in-memory state and the WebSocket without
+      // broadcasting a 'leave' message — that would tell the server we're
+      // gone forever, but we may just be remounting. Explicit user leaves
+      // go through endChat() which calls cleanup() with skipLeave=false.
+      cleanup(true)
     }
   }, [roomId, role, creatorPubKeyOrShare]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1906,11 +1907,7 @@ export function useGroupChat(
     setLocalUsername: setLocalUsernameAndNotify,
     mediaKeyRaw,
     error,
-    // Derive from actual key-exchanged peers (the only peers we can decrypt
-    // from). This guarantees the badge cannot show more participants than
-    // there are real encrypted peers, even if a server message arrives with
-    // a stale higher count due to reconnect races on flaky mobile networks.
-    participantCount: peerPubKeysMap.size + 1,
+    participantCount,
     myClientId,
     myPubKeyRaw,
     peerPubKeys: peerPubKeysMap,
