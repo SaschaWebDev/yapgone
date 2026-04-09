@@ -11,7 +11,7 @@ interface PhotoEntry {
 }
 
 interface PhotoComposerProps {
-  onSend: (files: File[], caption?: string, timed?: boolean) => void
+  onSend: (files: File[], caption?: string, timed?: boolean, hd?: boolean) => void
   onSendFile?: (file: File) => void
   onClose: () => void
   recentEmojis?: readonly string[]
@@ -26,6 +26,10 @@ export function PhotoComposer({ onSend, onSendFile, onClose, recentEmojis = [], 
   const [caption, setCaption] = useState('')
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false)
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null)
+  // HD mode: when true, files are sent at original quality (and metadata,
+  // including GPS EXIF) instead of being compressed to WebP. Defaults to off
+  // — every send is a fresh decision, never persisted.
+  const [hdMode, setHdMode] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const captionRef = useRef<HTMLInputElement>(null)
   const emojiBtnRef = useRef<HTMLButtonElement>(null)
@@ -163,9 +167,9 @@ export function PhotoComposer({ onSend, onSendFile, onClose, recentEmojis = [], 
     if (photos.length === 0) return
     const files = photos.map(p => p.file)
     const trimmed = caption.trim()
-    onSend(files, trimmed || undefined, timed || undefined)
+    onSend(files, trimmed || undefined, timed || undefined, hdMode)
     onClose()
-  }, [photos, caption, onSend, onClose])
+  }, [photos, caption, onSend, onClose, hdMode])
 
   const handleEmojiSelect = useCallback((emoji: string) => {
     setCaption(prev => (prev + emoji).slice(0, MAX_MESSAGE_LENGTH))
@@ -302,26 +306,41 @@ export function PhotoComposer({ onSend, onSendFile, onClose, recentEmojis = [], 
               <button type="button" className={styles.cancelButton} onClick={onClose}>
                 Cancel
               </button>
-              <div className={styles.splitButton}>
+              <div className={styles.sendCluster}>
                 <button
                   type="button"
-                  className={styles.splitButtonLeft}
-                  disabled={photos.length === 0}
-                  onClick={() => handleSend(false)}
-                  aria-label="Send gallery"
+                  className={`${styles.hdToggle}${hdMode ? ` ${styles.hdToggleActive}` : ''}`}
+                  onClick={() => setHdMode(v => !v)}
+                  aria-pressed={hdMode}
+                  title={
+                    hdMode
+                      ? 'HD ON — sending originals (preserves image metadata, including any GPS location)'
+                      : 'HD OFF — auto-compressing to WebP (strips metadata)'
+                  }
                 >
-                  {sendIcon}
+                  HD
                 </button>
-                <div className={styles.splitDivider} />
-                <button
-                  type="button"
-                  className={styles.splitButtonRight}
-                  disabled={photos.length === 0}
-                  onClick={() => handleSend(true)}
-                  aria-label="Send as timed gallery"
-                >
-                  <IconViewOnce size={18} />
-                </button>
+                <div className={styles.splitButton}>
+                  <button
+                    type="button"
+                    className={styles.splitButtonLeft}
+                    disabled={photos.length === 0}
+                    onClick={() => handleSend(false)}
+                    aria-label="Send gallery"
+                  >
+                    {sendIcon}
+                  </button>
+                  <div className={styles.splitDivider} />
+                  <button
+                    type="button"
+                    className={styles.splitButtonRight}
+                    disabled={photos.length === 0}
+                    onClick={() => handleSend(true)}
+                    aria-label="Send as timed gallery"
+                  >
+                    <IconViewOnce size={18} />
+                  </button>
+                </div>
               </div>
             </div>
           </>

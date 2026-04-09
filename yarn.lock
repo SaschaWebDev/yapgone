@@ -759,6 +759,23 @@
     "@jridgewell/resolve-uri" "^3.1.0"
     "@jridgewell/sourcemap-codec" "^1.4.14"
 
+"@jsquash/jpeg@^1.6.0":
+  version "1.6.0"
+  resolved "https://registry.yarnpkg.com/@jsquash/jpeg/-/jpeg-1.6.0.tgz#45474ce6d5b6165740d135c7bdf36dee9ba8618e"
+  integrity sha512-zwN46Awh1VM6gXlIcALwb5WzqK5H2e6+Awcs1QP8AvS8ohsK/sbE4esvmH4jhlhW7+CgiUUww66vg0aTnlSIMA==
+
+"@jsquash/png@^3.1.1":
+  version "3.1.1"
+  resolved "https://registry.yarnpkg.com/@jsquash/png/-/png-3.1.1.tgz#26b154c35f297ca8d1d31e7ecb23ef2447b9a986"
+  integrity sha512-C10pc+0H6j0h8fENOfnGOvkXCmvpSQTDGlfGd0sHphZhPSGTyLjIrHba0FaZZdsKqA/wlmhYicUHb92vfZphaw==
+
+"@jsquash/webp@^1.5.0":
+  version "1.5.0"
+  resolved "https://registry.yarnpkg.com/@jsquash/webp/-/webp-1.5.0.tgz#1e8ce357cde2decf4f880a8c436f8f1529cd3f48"
+  integrity sha512-KggLoj2MnRSfIqTeKe1EmbljTX2vuV7mh79k89PCL1pyqiDULcPM1L47twxXt0hkb68F70bXiL31MxsuoZtKFw==
+  dependencies:
+    wasm-feature-detect "^1.2.11"
+
 "@rolldown/pluginutils@1.0.0-beta.27":
   version "1.0.0-beta.27"
   resolved "https://registry.yarnpkg.com/@rolldown/pluginutils/-/pluginutils-1.0.0-beta.27.tgz#47d2bf4cef6d470b22f5831b420f8964e0bf755f"
@@ -1439,6 +1456,11 @@ has-flag@^4.0.0:
   resolved "https://registry.yarnpkg.com/has-flag/-/has-flag-4.0.0.tgz#944771fd9c81c81265c4d6941860da06bb59479b"
   integrity sha512-EykJT/Q1KjTWctppgIAgfSO0tKVuZUjhgMr17kqTumMl6Afv3EISleU7qZUzoXDFTAHTDC4NOoG/ZxU3EvlMPQ==
 
+heic2any@^0.0.4:
+  version "0.0.4"
+  resolved "https://registry.yarnpkg.com/heic2any/-/heic2any-0.0.4.tgz#eddb8e6fec53c8583a6e18b65069bb5e8d19028a"
+  integrity sha512-3lLnZiDELfabVH87htnRolZ2iehX9zwpRyGNz22GKXIu0fznlblf0/ftppXKNqS26dqFSeqfIBhAmAj/uSp0cA==
+
 is-arrayish@^0.3.1:
   version "0.3.4"
   resolved "https://registry.yarnpkg.com/is-arrayish/-/is-arrayish-0.3.4.tgz#1ee5553818511915685d33bb13d31bf854e5059d"
@@ -1991,6 +2013,11 @@ vitest@~3.0.0:
     vite "^5.0.0 || ^6.0.0"
     vite-node "3.0.9"
     why-is-node-running "^2.3.0"
+
+wasm-feature-detect@^1.2.11:
+  version "1.8.0"
+  resolved "https://registry.yarnpkg.com/wasm-feature-detect/-/wasm-feature-detect-1.8.0.tgz#4e9f55b0a64d801f372fbb0324ed11ad3abd0c78"
+  integrity sha512-zksaLKM2fVlnB5jQQDqKXXwYHLQUVH9es+5TOOHwGOVJOCeRBCiPjwSg+3tN2AdTCzjgli4jijCH290kXb/zWQ==
 
 webidl-conversions@^7.0.0:
   version "7.0.0"

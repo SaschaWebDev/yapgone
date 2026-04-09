@@ -562,6 +562,28 @@ function GalleryBubbleContent({
             ? styles.galleryGrid4
             : styles.galleryGrid5;
 
+  // Aggregate compression hint for the sender's local bubble. Hidden for
+  // received messages (no originalSize on the wire) and for galleries where
+  // nothing actually got compressed (HD mode, animated, ineffective).
+  let compressionHint: string | null = null;
+  if (isSelf) {
+    let totalOriginal = 0;
+    let totalFinal = 0;
+    let anyCompressed = false;
+    for (const img of gallery) {
+      totalFinal += img.fileSize;
+      if (img.originalSize != null && img.originalSize > img.fileSize) {
+        totalOriginal += img.originalSize;
+        anyCompressed = true;
+      } else {
+        totalOriginal += img.fileSize;
+      }
+    }
+    if (anyCompressed) {
+      compressionHint = `Compressed ${formatFileSize(totalOriginal)} \u2192 ${formatFileSize(totalFinal)}`;
+    }
+  }
+
   return (
     <div className={styles.galleryContent}>
       {timed && (
@@ -621,12 +643,19 @@ function GalleryBubbleContent({
       {caption && (
         <p className={styles.galleryCaption}>{formatMessage(caption)}</p>
       )}
-      <time
-        className={styles.time}
-        dateTime={new Date(timestamp).toISOString()}
-      >
-        {time}
-      </time>
+      <div className={styles.galleryFooter}>
+        <time
+          className={styles.time}
+          dateTime={new Date(timestamp).toISOString()}
+        >
+          {time}
+        </time>
+        {compressionHint && (
+          <span className={styles.galleryCompressionHint}>
+            &middot; {compressionHint}
+          </span>
+        )}
+      </div>
     </div>
   );
 }

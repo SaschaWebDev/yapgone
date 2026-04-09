@@ -1471,6 +1471,19 @@
   margin-top: 0.2rem;
 }
 
+.galleryFooter {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.galleryCompressionHint {
+  font-size: 0.7rem;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
 /* Prediction styles */
 .predictionContent {
   display: flex;

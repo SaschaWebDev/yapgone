@@ -266,6 +266,44 @@
   background: var(--bg-elevated);
 }
 
+.sendCluster {
+  display: flex;
+  align-items: stretch;
+  gap: 0.5rem;
+}
+
+.hdToggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.45rem 0.75rem;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+
+.hdToggle:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.hdToggleActive {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.hdToggleActive:hover {
+  opacity: 0.88;
+}
+
 /* Split send button */
 .splitButton {
   display: flex;
