@@ -1378,6 +1378,26 @@ export function useGroupChat(
               setPhase(clientIds.length > 0 ? 'key-exchange' : 'waiting')
             } else if (role === 'creator') {
               if (clientIds.length > 0) {
+                // The creator finds existing peers in the roster. This
+                // happens after a fresh mount (e.g., iOS reloaded the tab
+                // while a joiner was already connected). The creator's
+                // server-side reconnect was treated as a resume, so peers
+                // were not notified via peer-joined and won't proactively
+                // send their pubkey. Push our pubkey to all of them now to
+                // bootstrap the key exchange — handleDirectMessage on the
+                // peer side will send their pubkey back.
+                for (const peerId of clientIds) {
+                  ws.send({
+                    type: 'direct',
+                    targetId: peerId,
+                    payload: JSON.stringify({
+                      type: 'pubkey',
+                      key: toBase64Url(gc.myPubKeyRaw),
+                      senderId: yourId,
+                    }),
+                  })
+                  pendingKeyExchangeRef.current.add(peerId)
+                }
                 setPhase('key-exchange')
               }
             }
@@ -1397,6 +1417,13 @@ export function useGroupChat(
 
           if (msg.type === 'room-expired') {
             setPhase('expired')
+            return
+          }
+
+          if (msg.type === 'room-full') {
+            wsRef.current?.cancelReconnect()
+            setError('Room is full')
+            setPhase('error')
             return
           }
 
@@ -1455,8 +1482,13 @@ export function useGroupChat(
 
         ws.onError = () => {
           if (cancelled) return
-          setError('Connection failed')
-          setPhase('error')
+          // Native WebSocket fires onerror immediately followed by onclose,
+          // and the reconnecting wrapper handles the close by triggering a
+          // retry cycle. Setting phase='error' here would short-circuit the
+          // recovery and lock the user into an error state on a transient
+          // blip (e.g., the brief network instability iOS Safari produces
+          // right after a tab returns from background). Defer to the close
+          // handler / reconnect cycle / onReconnectFailed instead.
         }
 
         ws.onReconnecting = () => {
