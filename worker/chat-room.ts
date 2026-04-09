@@ -103,6 +103,18 @@ export class ChatRoom extends DurableObject {
       if (occupied >= this.maxClients) {
         const pair = new WebSocketPair()
         this.ctx.acceptWebSocket(pair[1])
+        // Mark the rejected socket as explicitly closed BEFORE closing it.
+        // Otherwise webSocketClose finds no parseable attachment, falls back
+        // to clientId='unknown', and the unexpected-disconnect path schedules
+        // a finalizeDeparture that fires peer-left to the legitimate
+        // participants — leaking the probe attempt as a spurious "A
+        // participant left" message in their UIs.
+        const rejectedAttachment: ClientAttachment = {
+          id: 'rejected',
+          messageTimestamps: [],
+          leftExplicitly: true,
+        }
+        pair[1].serializeAttachment(rejectedAttachment)
         pair[1].send(JSON.stringify({ type: 'room-full' }))
         pair[1].close(4000, 'Room is full')
         return new Response(null, { status: 101, webSocket: pair[0] })
