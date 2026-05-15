@@ -663,14 +663,7 @@
     gap: 8px;
   }
   .foot {
-    bottom: 16px;
-    font-size: 10px;
-  }
-  .footSide {
-    gap: 8px 14px;
-  }
-  .footLabel {
-    flex: 0 0 100%;
+    display: none;
   }
 }
 
