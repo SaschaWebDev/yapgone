@@ -606,6 +606,9 @@
   .h1 {
     font-size: 56px;
   }
+  .kbd {
+    display: none;
+  }
   .foot {
     left: 24px;
     right: 24px;
@@ -629,6 +632,10 @@
   }
   .wordmark {
     font-size: 18px;
+  }
+  .hero {
+    justify-content: flex-start;
+    padding-top: 140px;
   }
   .heroLogo {
     width: 88px;
@@ -656,7 +663,14 @@
     gap: 8px;
   }
   .foot {
+    bottom: 16px;
     font-size: 10px;
+  }
+  .footSide {
+    gap: 8px 14px;
+  }
+  .footLabel {
+    flex: 0 0 100%;
   }
 }
 
