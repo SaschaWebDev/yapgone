@@ -230,6 +230,14 @@
   z-index: 10;
 }
 
+.heroLogo {
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+  display: block;
+  margin-bottom: 24px;
+}
+
 .eyebrow {
   display: inline-flex;
   align-items: center;
@@ -590,6 +598,11 @@
   .hero {
     padding: 0 28px;
   }
+  .heroLogo {
+    width: 96px;
+    height: 96px;
+    margin-bottom: 22px;
+  }
   .h1 {
     font-size: 56px;
   }
@@ -617,6 +630,11 @@
   .wordmark {
     font-size: 18px;
   }
+  .heroLogo {
+    width: 88px;
+    height: 88px;
+    margin-bottom: 18px;
+  }
   .h1 {
     font-size: 42px;
   }
@@ -643,6 +661,11 @@
 }
 
 @media (max-height: 720px) {
+  .heroLogo {
+    width: 72px;
+    height: 72px;
+    margin-bottom: 16px;
+  }
   .h1 {
     font-size: 56px;
   }

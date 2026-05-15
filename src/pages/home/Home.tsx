@@ -288,6 +288,7 @@ export function Home() {
       </nav>
 
       <div className={styles.hero}>
+        <img src='/yapgone-logo.png' alt='' className={styles.heroLogo} />
         <div className={styles.eyebrow}>
           <span className={styles.eyebrowKey}>e2ee</span>
           client-side · zero-knowledge chat
