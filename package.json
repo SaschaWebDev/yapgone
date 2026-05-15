@@ -15,6 +15,8 @@
     "worker:deploy": "wrangler deploy worker/index.ts"
   },
   "dependencies": {
+    "@fontsource-variable/geist": "^5.2.8",
+    "@fontsource-variable/geist-mono": "^5.2.7",
     "@jsquash/jpeg": "^1.6.0",
     "@jsquash/png": "^3.1.1",
     "@jsquash/webp": "^1.5.0",

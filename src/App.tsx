@@ -7,18 +7,18 @@ export function App() {
 
   return (
     <ErrorBoundary>
-      <Layout>
-        {route.mode === 'chat' ? (
+      {route.mode === 'chat' ? (
+        <Layout>
           <Chat
             key={route.roomId}
             roomId={route.roomId}
             creatorPubKey={route.creatorPubKey}
             roomSettings={route.roomSettings}
           />
-        ) : (
-          <Home />
-        )}
-      </Layout>
+        </Layout>
+      ) : (
+        <Home />
+      )}
     </ErrorBoundary>
   )
 }

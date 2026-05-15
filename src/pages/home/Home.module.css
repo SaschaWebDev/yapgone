@@ -1,65 +1,652 @@
-.wrapper {
+/* yapgone landing — spotlight + decrypt cipher
+ * Ported from the design bundle (claude.ai/design) — V1 Spotlight + H_Decrypt.
+ * Colors and fonts are locally scoped so they don't bleed into the chat page. */
+
+@property --bx { syntax: '<percentage>'; inherits: true; initial-value: 30%; }
+@property --by { syntax: '<percentage>'; inherits: true; initial-value: 40%; }
+@property --cx { syntax: '<percentage>'; inherits: true; initial-value: 75%; }
+@property --cy { syntax: '<percentage>'; inherits: true; initial-value: 70%; }
+
+.root {
+  --yg-bg: #06070d;
+  --yg-blue: #5b5bff;
+  --yg-cyan: #5bd3ff;
+  --yg-violet: #8b6bff;
+  --yg-text: #ededf5;
+  --yg-muted: #8a8aa0;
+  --yg-line: rgba(255, 255, 255, 0.08);
+
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: var(--yg-bg);
+  color: var(--yg-text);
+  font-family: 'Geist Variable', 'Geist', -apple-system, BlinkMacSystemFont,
+    'Segoe UI', system-ui, sans-serif;
+  font-feature-settings: 'ss01', 'cv11';
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: -0.011em;
+}
+
+.mono {
+  font-family: 'Geist Mono Variable', 'Geist Mono', ui-monospace, 'SF Mono',
+    Menlo, monospace;
+}
+
+/* ── background: spotlight on a faint dot grid ───────────────────── */
+.stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.grid {
+  position: absolute;
+  inset: -200px;
+  background-image:
+    radial-gradient(circle at center, rgba(255, 255, 255, 0.18) 1px, transparent 1.4px),
+    linear-gradient(rgba(120, 140, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(120, 140, 255, 0.04) 1px, transparent 1px);
+  background-size: 28px 28px, 28px 28px, 28px 28px;
+  opacity: 0.1;
+}
+
+.gridBright {
+  position: absolute;
+  inset: -200px;
+  background-image:
+    radial-gradient(circle at center, rgba(180, 200, 255, 0.9) 1.2px, transparent 1.6px),
+    linear-gradient(rgba(140, 180, 255, 0.18) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(140, 180, 255, 0.18) 1px, transparent 1px);
+  background-size: 28px 28px, 28px 28px, 28px 28px;
+  -webkit-mask: radial-gradient(
+    circle 380px at var(--bx, 30%) var(--by, 40%),
+    black 0%,
+    rgba(0, 0, 0, 0.6) 30%,
+    transparent 70%
+  );
+  mask: radial-gradient(
+    circle 380px at var(--bx, 30%) var(--by, 40%),
+    black 0%,
+    rgba(0, 0, 0, 0.6) 30%,
+    transparent 70%
+  );
+  animation: beamSweep 14s ease-in-out infinite;
+}
+
+.beam {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    circle 480px at var(--bx, 30%) var(--by, 40%),
+    rgba(91, 91, 255, 0.3) 0%,
+    rgba(91, 91, 255, 0.15) 20%,
+    rgba(91, 91, 255, 0.04) 45%,
+    transparent 70%
+  );
+  mix-blend-mode: screen;
+  animation: beamSweep 14s ease-in-out infinite;
+}
+
+.beam2 {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    circle 280px at var(--cx, 75%) var(--cy, 70%),
+    rgba(139, 107, 255, 0.22) 0%,
+    rgba(139, 107, 255, 0.08) 35%,
+    transparent 65%
+  );
+  mix-blend-mode: screen;
+  animation: beamSweep2 18s ease-in-out infinite;
+}
+
+.vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 40%,
+    rgba(6, 7, 13, 0.7) 100%
+  );
+}
+
+@keyframes beamSweep {
+  0%   { --bx: 18%; --by: 35%; }
+  25%  { --bx: 72%; --by: 22%; }
+  50%  { --bx: 80%; --by: 70%; }
+  75%  { --bx: 30%; --by: 78%; }
+  100% { --bx: 18%; --by: 35%; }
+}
+
+@keyframes beamSweep2 {
+  0%   { --cx: 80%; --cy: 75%; }
+  33%  { --cx: 25%; --cy: 60%; }
+  66%  { --cx: 60%; --cy: 25%; }
+  100% { --cx: 80%; --cy: 75%; }
+}
+
+/* ── top nav ─────────────────────────────────────────────────────── */
+.nav {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  text-align: center;
-  flex: 1;
-  gap: 1.5rem;
-  animation: fadeIn 0.4s ease-out;
-  min-height: 0;
-  overflow-y: auto;
+  justify-content: space-between;
+  padding: 28px 48px;
+  z-index: 20;
 }
 
-.wrapper > :first-child {
-  margin-top: auto;
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
 }
 
-.wrapper > :last-child {
-  margin-bottom: auto;
-}
-
-.heroLogo {
-  width: 4rem;
-  height: 4rem;
+.brandLogo {
+  width: 36px;
+  height: 36px;
+  display: block;
   object-fit: contain;
 }
 
-.heading {
-  font-size: 2rem;
+.wordmark {
+  font-size: 20px;
   font-weight: 600;
-  letter-spacing: -0.03em;
-  line-height: 1.2;
-  color: var(--text-primary);
+  letter-spacing: -0.02em;
 }
 
-.description {
-  color: var(--text-secondary);
-  font-size: 1.05rem;
-  max-width: 26.25rem;
-  line-height: 1.6;
+.tagline {
+  font-size: 12px;
+  color: var(--yg-muted);
+  font-family: 'Geist Mono Variable', 'Geist Mono', ui-monospace, monospace;
+  margin-left: 14px;
+  padding-left: 14px;
+  border-left: 1px solid var(--yg-line);
+  letter-spacing: 0;
 }
 
-.createButton {
-  background: var(--accent);
-  color: #fff;
-  border: none;
-  border-radius: var(--radius-md);
-  padding: 0.75rem 1.75rem;
-  font-size: 1rem;
+.navActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--yg-line);
+  color: var(--yg-text);
+  font-size: 13px;
   font-weight: 500;
-  transition: background 0.15s;
+  font-family: 'Geist Mono Variable', 'Geist Mono', ui-monospace, monospace;
+  letter-spacing: 0;
 }
 
-.createButton:hover:not(:disabled) {
-  background: var(--accent-hover);
+.pillDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #4ade80;
+  box-shadow: 0 0 8px #4ade80;
 }
 
-.createButton:disabled {
-  opacity: 0.6;
+.iconBtn {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--yg-line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--yg-text);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.iconBtn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+/* ── hero ────────────────────────────────────────────────────────── */
+.hero {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0 64px;
+  z-index: 10;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 14px 7px 10px;
+  border-radius: 999px;
+  background: rgba(91, 91, 255, 0.08);
+  border: 1px solid rgba(91, 91, 255, 0.22);
+  color: #c4c6ff;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: 'Geist Mono Variable', 'Geist Mono', ui-monospace, monospace;
+  letter-spacing: 0.02em;
+  margin-bottom: 28px;
+}
+
+.eyebrowKey {
+  display: inline-flex;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(91, 91, 255, 0.18);
+  color: #d8d9ff;
+  font-size: 10px;
+}
+
+.h1 {
+  font-size: 76px;
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+  font-weight: 500;
+  margin: 0 0 22px;
+  max-width: 980px;
+  background: linear-gradient(180deg, #ffffff 0%, #b6b8d2 130%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.sub {
+  font-size: 18px;
+  line-height: 1.55;
+  color: #c0c2d4;
+  max-width: 580px;
+  margin: 0 0 40px;
+}
+
+.ctas {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 22px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  border: none;
+  font-family: inherit;
+  color: inherit;
+}
+
+.btn:disabled {
   cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.btnPrimary {
+  background: linear-gradient(180deg, #6b6bff 0%, #4a4aff 100%);
+  color: #fff;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.25) inset,
+    0 -8px 16px rgba(20, 10, 80, 0.4) inset,
+    0 10px 30px -8px rgba(91, 91, 255, 0.6),
+    0 0 0 1px rgba(91, 91, 255, 0.5);
+}
+
+.btnPrimary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.btnGhost {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--yg-line);
+  color: var(--yg-text);
+}
+
+.btnGhost:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.kbd {
+  display: inline-flex;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 11px;
+  font-family: 'Geist Mono Variable', 'Geist Mono', ui-monospace, monospace;
+  color: var(--yg-muted);
+}
+
+.tickRow {
+  display: flex;
+  gap: 18px;
+  justify-content: center;
+  margin-top: 22px;
+  font-family: 'Geist Mono Variable', 'Geist Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--yg-muted);
+  letter-spacing: 0.02em;
+}
+
+.tick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tickIcon {
+  width: 12px;
+  height: 12px;
 }
 
 .error {
-  color: var(--error);
-  font-size: 0.875rem;
+  color: #ff8a80;
+  font-size: 13px;
+  margin: 18px 0 0;
+  font-family: 'Geist Mono Variable', 'Geist Mono', ui-monospace, monospace;
+}
+
+/* ── decrypt cipher ──────────────────────────────────────────────── */
+.decryptWrap {
+  display: inline-block;
+}
+
+.decrypt {
+  font-style: normal;
+  font-family: 'Geist Mono Variable', 'Geist Mono', ui-monospace, monospace;
+  letter-spacing: -0.04em;
+  font-weight: 500;
+  background: linear-gradient(180deg, #d6d8ff 0%, #5b5bff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  display: inline-block;
+  min-width: 2.3em;
+}
+
+.caret {
+  display: inline-block;
+  width: 0.06em;
+  height: 0.78em;
+  background: #5b5bff;
+  vertical-align: -0.06em;
+  margin-left: 0.04em;
+  animation: caretBlink 1s steps(1) infinite;
+  box-shadow: 0 0 12px #5b5bff;
+}
+
+@keyframes caretBlink {
+  50% { opacity: 0; }
+}
+
+/* ── footer strip ────────────────────────────────────────────────── */
+.foot {
+  position: absolute;
+  left: 48px;
+  right: 48px;
+  bottom: 28px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 20;
+  font-family: 'Geist Mono Variable', 'Geist Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--yg-muted);
+  letter-spacing: 0.02em;
+  gap: 24px;
+}
+
+.footSide {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+}
+
+.footLabel {
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: rgba(255, 255, 255, 0.34);
+}
+
+.cap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.capDot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: #5be0a8;
+  box-shadow: 0 0 6px rgba(91, 224, 168, 0.7);
+  display: inline-block;
+}
+
+.hash {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.footLink {
+  color: #b6b8d2;
+  text-decoration: none;
+  cursor: pointer;
+  border-bottom: 1px dotted rgba(182, 184, 210, 0.35);
+  padding-bottom: 1px;
+  background: none;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+  font: inherit;
+  letter-spacing: inherit;
+}
+
+.footLink:hover {
+  color: #fff;
+}
+
+/* ── join dialog ─────────────────────────────────────────────────── */
+.dialogBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(6, 7, 13, 0.7);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  animation: fadeIn 0.18s ease-out;
+}
+
+.dialog {
+  background: linear-gradient(180deg, #14162a 0%, #0c0e1a 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 28px;
+  width: min(440px, calc(100vw - 32px));
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 30px 80px -20px rgba(0, 0, 0, 0.8),
+    0 0 0 1px rgba(91, 91, 255, 0.18);
+}
+
+.dialogTitle {
+  margin: 0 0 6px;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--yg-text);
+}
+
+.dialogHint {
+  margin: 0 0 18px;
+  font-size: 13px;
+  color: var(--yg-muted);
+  line-height: 1.5;
+}
+
+.dialogInput {
+  width: 100%;
+  padding: 11px 14px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--yg-text);
+  font-family: 'Geist Mono Variable', 'Geist Mono', ui-monospace, monospace;
+  font-size: 13px;
+  letter-spacing: 0;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.dialogInput:focus {
+  border-color: rgba(91, 91, 255, 0.6);
+}
+
+.dialogError {
+  color: #ff8a80;
+  font-size: 12px;
+  margin: 10px 0 0;
+  font-family: 'Geist Mono Variable', 'Geist Mono', ui-monospace, monospace;
+}
+
+.dialogActions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+
+.dialogBtn {
+  padding: 10px 18px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid transparent;
+  font-family: inherit;
+  letter-spacing: -0.01em;
+}
+
+.dialogBtnGhost {
+  background: transparent;
+  border-color: var(--yg-line);
+  color: var(--yg-text);
+}
+
+.dialogBtnGhost:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.dialogBtnPrimary {
+  background: linear-gradient(180deg, #6b6bff 0%, #4a4aff 100%);
+  color: #fff;
+  border-color: rgba(91, 91, 255, 0.5);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.2) inset,
+    0 6px 18px -6px rgba(91, 91, 255, 0.5);
+}
+
+.dialogBtnPrimary:hover {
+  filter: brightness(1.08);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ── responsive ──────────────────────────────────────────────────── */
+@media (max-width: 880px) {
+  .nav {
+    padding: 20px 24px;
+  }
+  .tagline {
+    display: none;
+  }
+  .hero {
+    padding: 0 28px;
+  }
+  .h1 {
+    font-size: 56px;
+  }
+  .foot {
+    left: 24px;
+    right: 24px;
+    bottom: 20px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .footSide {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+}
+
+@media (max-width: 560px) {
+  .nav {
+    padding: 16px 18px;
+  }
+  .pill {
+    display: none;
+  }
+  .wordmark {
+    font-size: 18px;
+  }
+  .h1 {
+    font-size: 42px;
+  }
+  .sub {
+    font-size: 15px;
+    margin-bottom: 28px;
+  }
+  .ctas {
+    flex-direction: column;
+    width: 100%;
+    max-width: 320px;
+  }
+  .btn {
+    width: 100%;
+    justify-content: center;
+  }
+  .tickRow {
+    flex-direction: column;
+    gap: 8px;
+  }
+  .foot {
+    font-size: 10px;
+  }
+}
+
+@media (max-height: 720px) {
+  .h1 {
+    font-size: 56px;
+  }
+  .sub {
+    margin-bottom: 24px;
+  }
 }
